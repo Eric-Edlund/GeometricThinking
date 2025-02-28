@@ -1,0 +1,8 @@
+/.direnv
+.env
+.envrc
+__pycache__
+shell.nix
+node_modules
+venv
+

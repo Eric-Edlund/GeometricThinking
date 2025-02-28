@@ -1,0 +1,12 @@
+
+#root, body, html {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+}
+
+/**Stop the stupid 2 finger back gesture.*/
+html {
+  overscroll-behavior-x: none;
+  overflow: hidden;
+}
