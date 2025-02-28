@@ -2,6 +2,7 @@ import { Add, Circle } from "@mui/icons-material"
 import { Root, createRoot } from "react-dom/client"
 import { add, avg, scale, subtract, Vec2 } from "../util/points"
 import { Box, IconButton, TextareaAutosize, Typography } from "@mui/material"
+import { useRef } from "react"
 
 export interface NodeStruct {
   id: number
@@ -18,6 +19,10 @@ export interface NodeStruct {
 // Debug
 const NODE_ALPHA = 1.0
 const DRAW_GRID = true
+
+enum Mode {
+  View = "view",
+}
 
 /**
  * Handles user input.
@@ -41,6 +46,10 @@ export class GraphEditor {
   private readonly publishGraphCb: (graph: NodeStruct[]) => void
 
   private mouseDown = false
+
+  private get mode(): Mode {
+    return Mode.View
+  }
 
   constructor(el: HTMLElement, publishGraph: (node: NodeStruct[]) => void) {
     if (this.lineCanvas.getContext("2d") == null) {
@@ -209,12 +218,14 @@ export class GraphEditor {
     this.overlayReact.render(<EditorOverlay />)
 
     // Determine scale
-    let semanticScale: "readable" | "word" = "readable"
-    const charsPerGraphUnit = this.el.clientWidth / this.width / 12
-    if (charsPerGraphUnit > 30) {
+    let semanticScale: "readable" | "structural" | "constellation" = "readable"
+    const cssPixelsPerGraphUnit = this.el.clientWidth / this.width
+    if (cssPixelsPerGraphUnit > 96) {
       semanticScale = "readable"
+    } else if (cssPixelsPerGraphUnit > 50) {
+      semanticScale = "structural"
     } else {
-      semanticScale = "word"
+      semanticScale = "constellation"
     }
 
     for (const [id, node] of this.graph.entries()) {
@@ -222,40 +233,38 @@ export class GraphEditor {
       const clientCoords = this.intoClientSpace(node.pos)
       const graphToClient = this.el.clientWidth / this.width
 
-      if (semanticScale == "readable") {
-        const margin = 8
+      if (["readable", "structural"].includes(semanticScale)) {
+        // When we zoom out, the margin should be reduced to improve positional accuracy
+        const margin = Math.min(8, 0.5 * graphToClient)
+        console.log(margin)
         applyCss(nEl, {
           width: px(node.dims[0] * graphToClient),
           height: px(node.dims[1] * graphToClient),
           left: px(clientCoords[0]),
           top: px(clientCoords[1]),
-          boxSizing: "border-box",
           padding: px(margin),
         })
         root.render(
           <NodeReact
             node={node}
+            semanticScale={semanticScale}
             width={nEl.clientWidth - 2 * margin}
             height={nEl.clientHeight - 2 * margin}
           />,
         )
       } else {
-        const iconWidth = 24
-        const centerClientPos = this.intoClientSpace(
+        const nodeWidth = node.dims[0] * graphToClient
+        const nodeCenter = this.intoClientSpace(
           add(node.pos, scale(0.5, node.dims)),
         )
-        const tlClientPos = subtract(
-          centerClientPos,
-          scale(0.5, [iconWidth, iconWidth]),
-        )
+        const nodeTl = subtract(nodeCenter, scale(0.5, [nodeWidth, nodeWidth]))
 
         applyCss(nEl, {
-          boxSizing: "content-box",
           padding: "0",
-          width: px(iconWidth),
-          height: px(iconWidth),
-          left: px(tlClientPos[0]),
-          top: px(this.el.clientHeight - tlClientPos[1]),
+          width: px(nodeWidth),
+          height: px(nodeWidth),
+          left: px(nodeTl[0]),
+          top: px(nodeTl[1]),
         })
         root.render(
           <Circle
@@ -265,6 +274,9 @@ export class GraphEditor {
               height: nEl.clientHeight,
               margin: 0,
               padding: 0,
+              position: 'absolute',
+              top: 0,
+              left: 0,
             }}
           />,
         )
@@ -351,6 +363,7 @@ export function EditorOverlay() {
 
 interface Props {
   node: NodeStruct
+  semanticScale: "readable" | "structural"
   width: number
   height: number
 }
@@ -358,30 +371,49 @@ interface Props {
 /**
  * Rendered node needs to be exactly the given width and height.
  */
-export function NodeReact({ node, width, height }: Props) {
+export function NodeReact({ node, semanticScale, width, height }: Props) {
+  const title = useRef(null)
+
+  const margin = 8
+  const border = 4
+
+  const textAreaHeight = height - 2 * margin - 2 * border - (title.current?.clientHeight ?? 0)
+
   return (
     <>
       <Box
         sx={{
           backgroundColor: "lightblue",
-          border: "white 0.2em solid",
+          border: `white ${border}px solid`,
           borderRadius: "0.5em",
-          paddingLeft: "0.5em",
-          paddingRight: "0.5em",
-          paddingBottom: "0.5em",
+          paddingLeft: px(margin),
+          paddingRight: px(margin),
+          paddingBottom: px(margin),
           // Don't let padding increase client width
           boxSizing: "border-box",
           width: width,
           height: height,
         }}
       >
-        <Typography variant="body1">id: {node.id}</Typography>
-        <TextareaAutosize
-          value={node.text}
-          minRows={6}
-          maxRows={8}
-          style={{ width: "100%" }}
-        />
+        {semanticScale == "readable" ? (
+          <>
+            <Typography ref={title} 
+              variant="body1">
+              id: {node.id}
+            </Typography>
+            {textAreaHeight > 0 ? (
+              <TextareaAutosize
+                value={node.text}
+                style={{
+                  width: width - 2 * margin - 2 * border,
+                  minHeight: textAreaHeight,
+                  maxHeight: textAreaHeight,
+                  boxSizing: "border-box",
+                }}
+              />
+            ) : null}
+          </>
+        ) : null}
       </Box>
     </>
   )
@@ -391,6 +423,7 @@ function newNodeEl() {
   const nEl = document.createElement("div")
   nEl.style.opacity = "" + NODE_ALPHA
   nEl.style.position = "absolute"
+  nEl.style.boxSizing = "border-box"
   return nEl
 }
 

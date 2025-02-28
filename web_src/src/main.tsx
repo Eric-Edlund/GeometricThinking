@@ -33,6 +33,13 @@ g.setGraph([
     dims: [0.5, 0.5],
     text: "Node 3",
     factualDependencies: [1],
+  },
+  {
+    id: 4,
+    pos: [-1.5, 0],
+    dims: [1, 1],
+    text: "Node 4",
+    factualDependencies: [],
   }
 ]);
 
