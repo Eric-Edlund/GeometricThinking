@@ -44,3 +44,4 @@ g.setGraph([
 ]);
 
 g.moveCenter([1.0, .7])
+g.focus()

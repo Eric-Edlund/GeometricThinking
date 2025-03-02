@@ -1,8 +1,16 @@
-import { Add, Circle } from "@mui/icons-material"
+import { Add } from "@mui/icons-material"
 import { Root, createRoot } from "react-dom/client"
-import { add, avg, scale, subtract, Vec2 } from "../util/points"
+import {
+  add,
+  avg,
+  distance,
+  scale,
+  subtract,
+  Vec2,
+} from "../util/points"
 import { Box, IconButton, TextareaAutosize, Typography } from "@mui/material"
 import { useRef } from "react"
+import { ScalarAnimation, Vec2Animation } from "../util/animation"
 
 export interface NodeStruct {
   id: number
@@ -19,17 +27,26 @@ export interface NodeStruct {
 // Debug
 const NODE_ALPHA = 1.0
 const DRAW_GRID = true
+const DRAW_MODE_INDICATOR = true
+const DRAW_CUR_GRAPH_POS = true
+
+const ANIMATION_DURATION = 200
 
 enum Mode {
   View = "view",
+  Edit = "edit",
 }
+
+
 
 /**
  * Handles user input.
  *
  * There are client pixel coords and graph coords. No other coords!
+ *
+ * Both graph and client coords are 0,0 in the top left.
  */
-export class GraphEditor {
+export class GraphEditor implements HasTryEnterEdit {
   private readonly el: HTMLElement
   // Node id to els
   private readonly graph = new Map<number, NodeStruct>()
@@ -39,19 +56,39 @@ export class GraphEditor {
   private readonly overlayDiv = document.createElement("div")
   private readonly overlayReact: Root = createRoot(this.overlayDiv)
   // In graph coordinates
-  private readonly center: [number, number] = [0, 0]
+  private get center(): [number, number] {
+    return this.centerAnimation.valueNow()
+  }
   // Width of the client in graph units.
-  private width: number
-
-  private readonly publishGraphCb: (graph: NodeStruct[]) => void
-
-  private mouseDown = false
-
-  private get mode(): Mode {
-    return Mode.View
+  private get width(): number {
+    return this.widthAnimation.valueNow()
   }
 
-  constructor(el: HTMLElement, publishGraph: (node: NodeStruct[]) => void) {
+  // Null indicates that the last frame drawn did not request that another frame
+  // be drawn.
+  private lastFrameTime: number | null = null
+
+  private mouseDown = false
+  private mouseDownPos: Vec2 | null = null
+  private mouseUpPos: Vec2 | null = null
+  private mouseDownOnBackground = false
+  private mousePos: Vec2 | null = null
+
+  private widthAnimation = new ScalarAnimation(0, {duration: ANIMATION_DURATION})
+  private centerAnimation = new Vec2Animation([0, 0], {duration: ANIMATION_DURATION})
+  private nextFrameTimer: number | null = null
+  private requestAnimationFrame() {
+    if (!this.nextFrameTimer) {
+      this.nextFrameTimer = setTimeout(() => {
+        this.nextFrameTimer = null
+        this.draw()
+      }, 30)
+    }
+  }
+
+  private mode = Mode.View
+
+  constructor(el: HTMLElement, _publishGraph: (node: NodeStruct[]) => void) {
     if (this.lineCanvas.getContext("2d") == null) {
       console.error("Could not create 2d drawing context for canvas.")
       throw new Error()
@@ -59,19 +96,25 @@ export class GraphEditor {
 
     this.el = el
     // Fit 3 40ch blocks
-    this.width = el.clientWidth / (10 * 40)
+    this.widthAnimation.setTarget(el.clientWidth / (10 * 40))
+    this.widthAnimation.finishNow()
     this.initEl()
-    this.publishGraphCb = publishGraph
     this.draw()
   }
 
   /**
    * Set the new center in graph coords.
    */
-  moveCenter(center: Vec2) {
-    this.center[0] = center[0]
-    this.center[1] = center[1]
+  moveCenter(center: Vec2, animate?: boolean) {
+    this.centerAnimation.setTarget(center)
+    if (!animate) {
+      this.centerAnimation.finishNow()
+    }
     this.draw()
+  }
+
+  focus() {
+    this.el.focus()
   }
 
   setGraph(nodes: NodeStruct[]) {
@@ -96,6 +139,8 @@ export class GraphEditor {
 
   private initEl() {
     this.el.style.backgroundColor = "rgba(0.1, 0.1, 0.1, 1.0)"
+    // Accepts focus (and key presses)
+    this.el.setAttribute("tabindex", "-1")
 
     this.el.append(this.lineCanvas, this.overlayDiv)
 
@@ -108,26 +153,96 @@ export class GraphEditor {
       "mousedown",
       (ev) => {
         this.mouseDown = true
-        ev.preventDefault()
+        this.mouseDownPos = [ev.clientX, ev.clientY]
+        if (this.mode == Mode.View) {
+          // This is for us moving the graph only.
+          // This prevents highlighting the nodes
+          ev.preventDefault()
+          this.el.focus()
+        }
+      },
+      { passive: false, capture: true },
+    )
+
+    this.el.addEventListener(
+      "mousedown",
+      (ev) => {
+        this.mouseDown = true
+        this.mouseDownOnBackground = true
+        this.mouseDownPos = [ev.clientX, ev.clientY]
+        if (this.mode == Mode.Edit) {
+        }
       },
       { passive: false },
     )
-    this.el.addEventListener("mouseup", () => {
+    this.el.addEventListener("mouseup", (ev) => {
+      this.mouseDownOnBackground = false
       this.mouseDown = false
+      this.mouseUpPos = [ev.clientX, ev.clientY]
+      if (this.mode == Mode.View) {
+        const travel = distance(this.mouseDownPos!, [ev.clientX, ev.clientY])
+        if (travel < 5) {
+          // It's a stationary click
+          // TODO: If it was an attempt to edit a node, switch to edit mode
+          // and pass a click event to the correct node
+        }
+      }
     })
     this.el.addEventListener("mousemove", (ev) => {
-      if (this.mouseDown) {
-        const scaleFactor = this.width / this.el.clientWidth
-        this.center[0] -= ev.movementX * scaleFactor
-        this.center[1] -= ev.movementY * scaleFactor
+      this.mousePos = this.intoGraphSpace([ev.clientX, ev.clientY])
+      if (DRAW_CUR_GRAPH_POS) {
         this.draw()
       }
+      const applyMovement = () => {
+        const scaleFactor = this.width / this.el.clientWidth
+        this.centerAnimation.cancel()
+        this.centerAnimation.setTarget([
+          this.center[0] - ev.movementX * scaleFactor,
+          this.center[1] - ev.movementY * scaleFactor,
+        ])
+        this.centerAnimation.finishNow()
+        this.draw()
+      }
+      if (this.mode === Mode.View) {
+        if (this.mouseDown) {
+          applyMovement()
+        }
+      } else if (this.mode === Mode.Edit) {
+        if (this.mouseDownOnBackground) {
+          applyMovement()
+        }
+      }
+    })
+
+    this.el.addEventListener(
+      "keydown",
+      (ev) => {
+        if (this.mode == Mode.View) {
+          if (ev.key == "i") {
+            this.mode = Mode.Edit
+            this.draw()
+            ev.preventDefault()
+          }
+        } else if (this.mode == Mode.Edit) {
+          if (ev.key == "Escape") {
+            this.mode = Mode.View
+            this.draw()
+            ev.preventDefault()
+          }
+        }
+      },
+      { passive: false },
+    )
+    this.el.addEventListener("mouseleave", () => {
+      this.mousePos = null
+      this.mouseDownOnBackground = false
+      this.mouseDown = false
+      this.mouseUpPos = null
     })
 
     this.el.addEventListener(
       "touchstart",
       (ev) => {
-        console.log("touch")
         if (ev.touches.length > 1) {
           // TODO: Handle multi-touch
           ev.preventDefault()
@@ -141,40 +256,77 @@ export class GraphEditor {
       (ev) => {
         const clientToGraph = this.width / this.el.clientWidth
         // Client pixels
-        let deltaX: number, deltaY: number
+        let deltaX: number, deltaY: number, deltaZoom: number
         switch (ev.deltaMode) {
           case ev.DOM_DELTA_PIXEL:
             deltaX = ev.deltaX // Random constant, idk bro
             deltaY = ev.deltaY
+            deltaZoom = ev.deltaY
             break
           case ev.DOM_DELTA_LINE:
-            deltaX = ev.deltaX * 16 // Random constant
+            deltaX = ev.deltaX * 16 // Random constant to pixels
             deltaY = ev.deltaY * 16
+            deltaZoom = ev.deltaY / 1.1
             break
           case ev.DOM_DELTA_PAGE:
             // TODO: Is this legit?
             deltaX = ev.deltaX
             deltaY = ev.deltaY
+            deltaZoom = ev.deltaY
             break
+          default:
+            console.error("This shouldn't happen.")
+            return
         }
 
         if (ev.ctrlKey) {
           const preCursorPos = this.intoGraphSpace([ev.clientX, ev.clientY])
-          this.width *= 1.1 ** ev.deltaY
           // Max pixel width per graph unit
-          this.width = Math.max(this.el.clientWidth / 500, this.width)
-          const postCursorPos = this.intoGraphSpace([ev.clientX, ev.clientY])
+          const minWidth = this.el.clientWidth / 500
+          let targetWidth = Math.max(minWidth, this.width * 1.1 ** deltaZoom)
+          this.widthAnimation.setTarget(targetWidth)
+
+          const postCursorPos = this.intoGraphSpace(
+            [ev.clientX, ev.clientY],
+            targetWidth,
+          )
           const deltaCursorPos = subtract(postCursorPos, preCursorPos)
           // Move center so that the point under the cursor didn't move
-          this.center[0] -= deltaCursorPos[0]
-          this.center[1] += deltaCursorPos[1]
+          this.centerAnimation.setTarget([
+            this.center[0] - deltaCursorPos[0],
+            this.center[1] - deltaCursorPos[1],
+          ])
         } else {
-          this.center[0] -= -ev.deltaX * clientToGraph
-          this.center[1] -= -ev.deltaY * clientToGraph
+          this.centerAnimation.cancel()
+          this.centerAnimation.setTarget([
+            this.center[0] - (-deltaX * clientToGraph),
+            this.center[1] - (-deltaY * clientToGraph),
+          ])
+          this.centerAnimation.finishNow()
         }
 
         ev.preventDefault()
         this.draw()
+      },
+      { passive: false },
+    )
+
+    this.el.addEventListener(
+      "click",
+      () => {
+      },
+      { passive: false, capture: true },
+    )
+
+    this.el.addEventListener(
+      "click",
+      (ev) => {
+        // This only gets called if a click is not consumed by a node or earlier
+        const travel = distance(this.mouseDownPos!, [ev.clientX, ev.clientY])
+        if (travel < 5 && this.mode == Mode.Edit) {
+          this.mode = Mode.View
+          this.draw()
+        }
       },
       { passive: false },
     )
@@ -190,18 +342,38 @@ export class GraphEditor {
     resizeLayers()
     window.addEventListener("resize", () => {
       // Increase the width so the scale stays the same
-      this.width *= this.el.clientWidth / this.lineCanvas.clientWidth
+      const newWidth = this.width * this.el.clientWidth / this.lineCanvas.clientWidth
+      this.widthAnimation.setTarget(newWidth) 
+      this.widthAnimation.finishNow()
       resizeLayers()
       this.draw()
     })
   }
 
-  private intoGraphSpace(clientPos: Vec2): Vec2 {
+  tryEnterEdit(_nodeId: number, cb: (ev: MouseEvent, ev1: MouseEvent) => void) {
+    const clickTravel = distance(this.mouseDownPos!, this.mouseUpPos!)
+    if (this.mode == Mode.View && clickTravel < 5) {
+      this.mode = Mode.Edit
+      this.draw()
+      cb(null, null)
+    }
+  }
+
+  private intoGraphSpace(clientPos: Vec2, customGraphWidth?: number): Vec2 {
+    // Find the clientToGraph scale coefficient (graph dist/client dist)
+    // Take the centerPos (graph vec2)
+    // Find the distance vector from the center in pixels (client vec2)
+    //
+    // return centerPos + distVector * clientToGraph
+
+    const clientToGraph = (customGraphWidth ?? this.width) / this.el.clientWidth
+    const clientCenter = [this.el.clientWidth / 2, this.el.clientHeight / 2]
     return [
       this.center[0] +
-        ((clientPos[0] / this.el.clientWidth) * 2 - 1) * (this.width / 2),
+        (clientPos[0] - clientCenter[0]) * clientToGraph,
+
       this.center[1] +
-        ((1 - clientPos[1] / this.el.clientHeight) * 2 - 1) * (this.width / 2),
+        (clientPos[1] - clientCenter[1]) * clientToGraph,
     ]
   }
 
@@ -215,7 +387,25 @@ export class GraphEditor {
   }
 
   private draw() {
-    this.overlayReact.render(<EditorOverlay />)
+    let requestFrame = false
+    const now = Date.now()
+    const deltaTime = now - (this.lastFrameTime ?? now)
+
+    if (this.widthAnimation.inProgress()) {
+      this.widthAnimation.passTime(deltaTime)
+      if (this.widthAnimation.inProgress()) {
+        requestFrame = true
+      }
+    }
+    if (this.centerAnimation.inProgress()) {
+      this.centerAnimation.passTime(deltaTime)
+      if (this.centerAnimation.inProgress()) {
+        requestFrame = true
+      }
+    }
+
+
+    this.overlayReact.render(<EditorOverlay mode={this.mode} curGraphPos={this.mousePos} />)
 
     // Determine scale
     let semanticScale: "readable" | "structural" | "constellation" = "readable"
@@ -226,61 +416,6 @@ export class GraphEditor {
       semanticScale = "structural"
     } else {
       semanticScale = "constellation"
-    }
-
-    for (const [id, node] of this.graph.entries()) {
-      const [nEl, root] = this.nodes.get(id)!
-      const clientCoords = this.intoClientSpace(node.pos)
-      const graphToClient = this.el.clientWidth / this.width
-
-      if (["readable", "structural"].includes(semanticScale)) {
-        // When we zoom out, the margin should be reduced to improve positional accuracy
-        const margin = Math.min(8, 0.5 * graphToClient)
-        console.log(margin)
-        applyCss(nEl, {
-          width: px(node.dims[0] * graphToClient),
-          height: px(node.dims[1] * graphToClient),
-          left: px(clientCoords[0]),
-          top: px(clientCoords[1]),
-          padding: px(margin),
-        })
-        root.render(
-          <NodeReact
-            node={node}
-            semanticScale={semanticScale}
-            width={nEl.clientWidth - 2 * margin}
-            height={nEl.clientHeight - 2 * margin}
-          />,
-        )
-      } else {
-        const nodeWidth = node.dims[0] * graphToClient
-        const nodeCenter = this.intoClientSpace(
-          add(node.pos, scale(0.5, node.dims)),
-        )
-        const nodeTl = subtract(nodeCenter, scale(0.5, [nodeWidth, nodeWidth]))
-
-        applyCss(nEl, {
-          padding: "0",
-          width: px(nodeWidth),
-          height: px(nodeWidth),
-          left: px(nodeTl[0]),
-          top: px(nodeTl[1]),
-        })
-        root.render(
-          <Circle
-            color="primary"
-            sx={{
-              width: nEl.clientWidth,
-              height: nEl.clientHeight,
-              margin: 0,
-              padding: 0,
-              position: 'absolute',
-              top: 0,
-              left: 0,
-            }}
-          />,
-        )
-      }
     }
 
     const ctx = this.lineCanvas.getContext("2d")!
@@ -298,8 +433,10 @@ export class GraphEditor {
       minX = Math.floor(minX / jump) * jump
       for (let i = minX; i < maxX; i += jump) {
         const pos = this.intoClientSpace([i, 0])
+        ctx.beginPath()
         ctx.moveTo(pos[0], 0)
         ctx.lineTo(pos[0], this.el.clientHeight)
+        ctx.closePath()
         ctx.stroke()
       }
       const aspectRatio = this.el.clientHeight / this.el.clientWidth
@@ -308,9 +445,69 @@ export class GraphEditor {
       minY = Math.floor(minY / jump) * jump
       for (let i = minY; i < maxY; i += jump) {
         const pos = this.intoClientSpace([0, i])
+        ctx.beginPath()
         ctx.moveTo(0, pos[1])
         ctx.lineTo(this.el.clientWidth, pos[1])
+        ctx.closePath()
         ctx.stroke()
+      }
+    }
+
+    for (const [id, node] of this.graph.entries()) {
+      const [nEl, root] = this.nodes.get(id)!
+      const clientCoords = this.intoClientSpace(node.pos)
+      const graphToClient = this.el.clientWidth / this.width
+
+      if (["readable", "structural"].includes(semanticScale)) {
+        // When we zoom out, the margin should be reduced to improve positional accuracy
+        const margin = Math.min(8, 0.5 * graphToClient)
+        applyCss(nEl, {
+          width: px(node.dims[0] * graphToClient),
+          height: px(node.dims[1] * graphToClient),
+          left: px(clientCoords[0]),
+          top: px(clientCoords[1]),
+          padding: px(margin),
+          display: "block",
+        })
+        root.render(
+          <NodeReact
+            node={node}
+            semanticScale={semanticScale}
+            width={nEl.clientWidth - 2 * margin}
+            height={nEl.clientHeight - 2 * margin}
+            tryEnterEdit={this}
+          />,
+        )
+      } else {
+        const nodeWidth = node.dims[0] * graphToClient
+        const nodeCenter = this.intoClientSpace(
+          add(node.pos, scale(0.5, node.dims)),
+        )
+        const nodeTl = subtract(nodeCenter, scale(0.5, [nodeWidth, nodeWidth]))
+
+        applyCss(nEl, {
+          padding: "0",
+          width: px(nodeWidth),
+          height: px(nodeWidth),
+          left: px(nodeTl[0]),
+          top: px(nodeTl[1]),
+          display: "none",
+        })
+        ctx.lineWidth = 5
+        ctx.strokeStyle = "white"
+        ctx.fillStyle = "white"
+
+        ctx.moveTo(nodeTl[0], nodeCenter[1])
+        ctx.beginPath()
+        ctx.arc(
+          nodeCenter[0],
+          nodeCenter[1],
+          Math.max(1, nodeWidth * 0.5 - 4),
+          0,
+          2 * Math.PI,
+        )
+        ctx.closePath()
+        ctx.fill()
       }
     }
 
@@ -328,9 +525,8 @@ export class GraphEditor {
           nEl.offsetTop + 0.5 * nEl.clientHeight,
         ]
 
-        ctx.lineWidth = 5
+        ctx.lineWidth = semanticScale == "constellation" ? 1 : 5
         ctx.strokeStyle = "white"
-        ctx.fillStyle = "white"
 
         ctx.beginPath()
         ctx.moveTo(srcPos[0], srcPos[1])
@@ -343,22 +539,71 @@ export class GraphEditor {
           destPos[0],
           destPos[1],
         )
+        ctx.closePath()
         ctx.stroke()
       }
+    }
+
+
+    if (requestFrame) {
+      this.lastFrameTime = now
+      this.requestAnimationFrame()
+    } else {
+      this.lastFrameTime = null
     }
   }
 }
 
-export function EditorOverlay() {
+interface OverlayProps {
+  mode: Mode
+  curGraphPos: Vec2 | null
+}
+
+export function EditorOverlay({ mode, curGraphPos }: OverlayProps) {
+  let modeColor
+  switch (mode) {
+    case Mode.View:
+      modeColor = "blue"
+      break
+    case Mode.Edit:
+      modeColor = "green"
+      break
+  }
+  const boxShadow = DRAW_MODE_INDICATOR ? `inset 0 0 8px ${modeColor}` : ""
+
   return (
-    <>
+    <Box
+      sx={{
+        boxShadow: boxShadow,
+        position: "absolute",
+        top: 0,
+        bottom: 0,
+        left: 0,
+        right: 0,
+      }}
+    >
+      {DRAW_CUR_GRAPH_POS ?
+      <Typography sx={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          color: 'white'
+        }} variant='h5'>Cur: {(curGraphPos ?? [])[0]?.toFixed(1)}, {(curGraphPos ?? [])[1]?.toFixed(1)}</Typography>
+      : null}
       <Box sx={{ position: "absolute", bottom: 1, width: "100%" }}>
         <IconButton>
           <Add color="primary" fontSize="large" />
         </IconButton>
       </Box>
-    </>
+    </Box>
   )
+}
+
+interface HasTryEnterEdit {
+  tryEnterEdit(
+    nodeId: number,
+    startEdit: (evDown: MouseEvent, evUp: MouseEvent) => void,
+  ): void
 }
 
 interface Props {
@@ -366,18 +611,29 @@ interface Props {
   semanticScale: "readable" | "structural"
   width: number
   height: number
+  /**
+   * When a node is clicked in a way that looks like the user wants to
+   * edit it, calls this function.
+   */
+  tryEnterEdit: HasTryEnterEdit
 }
 
 /**
  * Rendered node needs to be exactly the given width and height.
  */
-export function NodeReact({ node, semanticScale, width, height }: Props) {
+export function NodeReact({
+  node,
+  semanticScale,
+  width,
+  height,
+  tryEnterEdit,
+}: Props) {
   const title = useRef(null)
-
   const margin = 8
   const border = 4
 
-  const textAreaHeight = height - 2 * margin - 2 * border - (title.current?.clientHeight ?? 0)
+  const textAreaHeight =
+    height - 2 * margin - 2 * border - (title.current?.clientHeight ?? 0)
 
   return (
     <>
@@ -397,13 +653,37 @@ export function NodeReact({ node, semanticScale, width, height }: Props) {
       >
         {semanticScale == "readable" ? (
           <>
-            <Typography ref={title} 
-              variant="body1">
+            <Typography ref={title} variant="body1">
               id: {node.id}
             </Typography>
-            {textAreaHeight > 0 ? (
+            {title.current && textAreaHeight > 0 ? (
               <TextareaAutosize
-                value={node.text}
+                onClick={(ev) => {
+                  tryEnterEdit.tryEnterEdit(node.id, (_downEv, _upEv) => {
+                    ev.target.focus()
+                    const mouseDown = new MouseEvent("mousedown", {
+                      clientX: ev.clientX,
+                      clientY: ev.clientY,
+                    })
+                    ev.target.dispatchEvent(mouseDown)
+                    const mouseUp = new MouseEvent("mouseup", {
+                      clientX: ev.clientX,
+                      clientY: ev.clientY,
+                    })
+                    ev.target.dispatchEvent(mouseUp)
+
+                    ev.target.dispatchEvent(
+                      new MouseEvent("click", {
+                        clientX: ev.clientX,
+                        clientY: ev.clientY,
+                      }),
+                    )
+                  })
+                }}
+                onChange={(e) => {
+                  node.text = e.target.value
+                }}
+                defaultValue={node.text}
                 style={{
                   width: width - 2 * margin - 2 * border,
                   minHeight: textAreaHeight,
@@ -424,6 +704,18 @@ function newNodeEl() {
   nEl.style.opacity = "" + NODE_ALPHA
   nEl.style.position = "absolute"
   nEl.style.boxSizing = "border-box"
+  nEl.addEventListener(
+    "click",
+    (ev) => {
+      console.log("Node stopped click")
+      ev.stopPropagation()
+    },
+    { passive: false },
+  )
+  nEl.addEventListener("mousedown", (ev) => {
+    // Capture mouse down
+    ev.stopPropagation()
+  })
   return nEl
 }
 
