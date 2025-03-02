@@ -1,30 +1,13 @@
 import { Add } from "@mui/icons-material"
 import { Root, createRoot } from "react-dom/client"
-import {
-  add,
-  avg,
-  distance,
-  scale,
-  subtract,
-  Vec2,
-} from "../util/points"
+import { add, avg, distance, scale, subtract, Vec2 } from "../util/points"
 import { Box, IconButton, TextareaAutosize, Typography } from "@mui/material"
 import { useRef } from "react"
 import { ScalarAnimation, Vec2Animation } from "../util/animation"
+import { ObservableGraph, NodeStruct } from "../util/graph"
 
 type SemanticScale = "readable" | "structural" | "constellation"
 
-export interface NodeStruct {
-  id: number
-  /**
-   * Top left
-   */
-  pos: [number, number]
-  dims: [number, number]
-  text: string
-
-  factualDependencies: number[]
-}
 
 // Debug
 const NODE_ALPHA = 1.0
@@ -39,8 +22,6 @@ enum Mode {
   Edit = "edit",
 }
 
-
-
 /**
  * Handles user input.
  *
@@ -51,7 +32,7 @@ enum Mode {
 export class GraphEditor implements HasTryEnterEdit {
   private readonly el: HTMLElement
   // Node id to els
-  private readonly graph = new Map<number, NodeStruct>()
+  private graph = new ObservableGraph()
   private readonly nodes = new Map<number, [HTMLElement, Root]>()
   private readonly lineCanvas: HTMLCanvasElement =
     document.createElement("canvas")
@@ -76,8 +57,12 @@ export class GraphEditor implements HasTryEnterEdit {
   private mouseDownOnBackground = false
   private mousePos: Vec2 | null = null
 
-  private widthAnimation = new ScalarAnimation(0, {duration: ANIMATION_DURATION})
-  private centerAnimation = new Vec2Animation([0, 0], {duration: ANIMATION_DURATION})
+  private widthAnimation = new ScalarAnimation(0, {
+    duration: ANIMATION_DURATION,
+  })
+  private centerAnimation = new Vec2Animation([0, 0], {
+    duration: ANIMATION_DURATION,
+  })
   private nextFrameTimer: number | null = null
   private requestAnimationFrame() {
     if (!this.nextFrameTimer) {
@@ -90,13 +75,16 @@ export class GraphEditor implements HasTryEnterEdit {
 
   private mode = Mode.View
 
-  constructor(el: HTMLElement, _publishGraph: (node: NodeStruct[]) => void) {
+  constructor(el: HTMLElement, g: Graph, _publishGraph: (g: ObservableGraph) => void) {
     if (this.lineCanvas.getContext("2d") == null) {
       console.error("Could not create 2d drawing context for canvas.")
       throw new Error()
     }
 
     this.el = el
+    this.graph = g
+    this.graph.listen(() => this.readGraphState())
+    this.readGraphState()
     // Fit 3 40ch blocks
     this.widthAnimation.setTarget(el.clientWidth / (10 * 40))
     this.widthAnimation.finishNow()
@@ -119,15 +107,13 @@ export class GraphEditor implements HasTryEnterEdit {
     this.el.focus()
   }
 
-  setGraph(nodes: NodeStruct[]) {
+  private readGraphState() {
     // Clean
     this.el.replaceChildren(this.lineCanvas, this.overlayDiv)
-    this.graph.clear()
     this.nodes.clear()
 
     // Add new
-    for (const n of nodes) {
-      this.graph.set(n.id, n)
+    for (const n of this.graph.nodes()) {
       const nEl = newNodeEl()
       nEl.style.zIndex = "1"
       this.el.appendChild(nEl)
@@ -305,8 +291,8 @@ export class GraphEditor implements HasTryEnterEdit {
         } else {
           this.centerAnimation.cancel()
           this.centerAnimation.setTarget([
-            this.center[0] - (-deltaX * clientToGraph),
-            this.center[1] - (-deltaY * clientToGraph),
+            this.center[0] - -deltaX * clientToGraph,
+            this.center[1] - -deltaY * clientToGraph,
           ])
           this.centerAnimation.finishNow()
         }
@@ -317,12 +303,10 @@ export class GraphEditor implements HasTryEnterEdit {
       { passive: false },
     )
 
-    this.el.addEventListener(
-      "click",
-      () => {
-      },
-      { passive: false, capture: true },
-    )
+    this.el.addEventListener("click", () => {}, {
+      passive: false,
+      capture: true,
+    })
 
     this.el.addEventListener(
       "click",
@@ -348,8 +332,9 @@ export class GraphEditor implements HasTryEnterEdit {
     resizeLayers()
     window.addEventListener("resize", () => {
       // Increase the width so the scale stays the same
-      const newWidth = this.width * this.el.clientWidth / this.lineCanvas.clientWidth
-      this.widthAnimation.setTarget(newWidth) 
+      const newWidth =
+        (this.width * this.el.clientWidth) / this.lineCanvas.clientWidth
+      this.widthAnimation.setTarget(newWidth)
       this.widthAnimation.finishNow()
       resizeLayers()
       this.draw()
@@ -365,6 +350,12 @@ export class GraphEditor implements HasTryEnterEdit {
     }
   }
 
+  createNode() {
+    console.log("Create node")
+    this.graph
+    this.draw()
+  }
+
   private intoGraphSpace(clientPos: Vec2, customGraphWidth?: number): Vec2 {
     // Find the clientToGraph scale coefficient (graph dist/client dist)
     // Take the centerPos (graph vec2)
@@ -375,11 +366,9 @@ export class GraphEditor implements HasTryEnterEdit {
     const clientToGraph = (customGraphWidth ?? this.width) / this.el.clientWidth
     const clientCenter = [this.el.clientWidth / 2, this.el.clientHeight / 2]
     return [
-      this.center[0] +
-        (clientPos[0] - clientCenter[0]) * clientToGraph,
+      this.center[0] + (clientPos[0] - clientCenter[0]) * clientToGraph,
 
-      this.center[1] +
-        (clientPos[1] - clientCenter[1]) * clientToGraph,
+      this.center[1] + (clientPos[1] - clientCenter[1]) * clientToGraph,
     ]
   }
 
@@ -410,8 +399,13 @@ export class GraphEditor implements HasTryEnterEdit {
       }
     }
 
-
-    this.overlayReact.render(<EditorOverlay mode={this.mode} curGraphPos={this.mousePos} />)
+    this.overlayReact.render(
+      <EditorOverlay
+        mode={this.mode}
+        curGraphPos={this.mousePos}
+        editor={this}
+      />,
+    )
 
     // Determine scale
     let semanticScale: SemanticScale = "readable"
@@ -550,7 +544,6 @@ export class GraphEditor implements HasTryEnterEdit {
       }
     }
 
-
     if (requestFrame) {
       this.lastFrameTime = now
       this.requestAnimationFrame()
@@ -563,9 +556,10 @@ export class GraphEditor implements HasTryEnterEdit {
 interface OverlayProps {
   mode: Mode
   curGraphPos: Vec2 | null
+  editor: GraphEditor
 }
 
-export function EditorOverlay({ mode, curGraphPos }: OverlayProps) {
+export function EditorOverlay({ mode, curGraphPos, editor }: OverlayProps) {
   let modeColor
   switch (mode) {
     case Mode.View:
@@ -588,16 +582,22 @@ export function EditorOverlay({ mode, curGraphPos }: OverlayProps) {
         right: 0,
       }}
     >
-      {DRAW_CUR_GRAPH_POS ?
-      <Typography sx={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          color: 'white'
-        }} variant='h5'>Cur: {(curGraphPos ?? [])[0]?.toFixed(1)}, {(curGraphPos ?? [])[1]?.toFixed(1)}</Typography>
-      : null}
+      {DRAW_CUR_GRAPH_POS ? (
+        <Typography
+          sx={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            color: "white",
+          }}
+          variant="h5"
+        >
+          Cur: {(curGraphPos ?? [])[0]?.toFixed(1)},{" "}
+          {(curGraphPos ?? [])[1]?.toFixed(1)}
+        </Typography>
+      ) : null}
       <Box sx={{ position: "absolute", bottom: 1, width: "100%" }}>
-        <IconButton>
+        <IconButton onMouseDown={editor.createNode}>
           <Add color="primary" fontSize="large" />
         </IconButton>
       </Box>
@@ -606,10 +606,7 @@ export function EditorOverlay({ mode, curGraphPos }: OverlayProps) {
 }
 
 interface HasTryEnterEdit {
-  tryEnterEdit(
-    nodeId: number,
-    startEdit: () => void,
-  ): void
+  tryEnterEdit(nodeId: number, startEdit: () => void): void
 }
 
 interface Props {

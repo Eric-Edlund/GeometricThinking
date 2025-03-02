@@ -1,16 +1,15 @@
-import {
-  NodeStruct,
-} from "./components/GraphEditor.tsx";
-import { GraphEditor } from "./components/GraphEditor.tsx";
-import "./App.css";
+import { GraphEditor } from "./components/GraphEditor.tsx"
+import "./App.css"
+import { ObservableGraph } from "./util/graph.ts"
 
-const root = document.getElementById("root")!;
-root.style.backgroundColor = "black";
-root.style.width = "100%";
-root.style.height = "100%";
+const root = document.getElementById("root")!
+root.style.backgroundColor = "black"
+root.style.width = "100%"
+root.style.height = "100%"
 
-const g = new GraphEditor(root, () => {});
-g.setGraph([
+const graph = new ObservableGraph()
+
+graph.addAll([
   {
     id: 1,
     pos: [0, 0],
@@ -40,8 +39,9 @@ g.setGraph([
     dims: [1, 1],
     text: "Node 4",
     factualDependencies: [],
-  }
-]);
+  },
+])
 
-g.moveCenter([1.0, .7])
-g.focus()
+const editor = new GraphEditor(root, graph, () => {})
+editor.moveCenter([1.0, 0.7])
+editor.focus()
