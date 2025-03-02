@@ -296,6 +296,10 @@ export class GraphEditor implements HasTryEnterEdit {
             this.center[0] - deltaCursorPos[0],
             this.center[1] - deltaCursorPos[1],
           ])
+          if (Math.abs(targetWidth / this.width - 1) < 0.3) {
+            this.widthAnimation.finishNow()
+            this.centerAnimation.finishNow()
+          }
         } else {
           this.centerAnimation.cancel()
           this.centerAnimation.setTarget([
