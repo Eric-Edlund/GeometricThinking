@@ -12,6 +12,8 @@ import { Box, IconButton, TextareaAutosize, Typography } from "@mui/material"
 import { useRef } from "react"
 import { ScalarAnimation, Vec2Animation } from "../util/animation"
 
+type SemanticScale = "readable" | "structural" | "constellation"
+
 export interface NodeStruct {
   id: number
   /**
@@ -354,12 +356,12 @@ export class GraphEditor implements HasTryEnterEdit {
     })
   }
 
-  tryEnterEdit(_nodeId: number, cb: (ev: MouseEvent, ev1: MouseEvent) => void) {
+  tryEnterEdit(_nodeId: number, cb: () => void) {
     const clickTravel = distance(this.mouseDownPos!, this.mouseUpPos!)
     if (this.mode == Mode.View && clickTravel < 5) {
       this.mode = Mode.Edit
       this.draw()
-      cb(null, null)
+      cb()
     }
   }
 
@@ -412,7 +414,7 @@ export class GraphEditor implements HasTryEnterEdit {
     this.overlayReact.render(<EditorOverlay mode={this.mode} curGraphPos={this.mousePos} />)
 
     // Determine scale
-    let semanticScale: "readable" | "structural" | "constellation" = "readable"
+    let semanticScale: SemanticScale = "readable"
     const cssPixelsPerGraphUnit = this.el.clientWidth / this.width
     if (cssPixelsPerGraphUnit > 96) {
       semanticScale = "readable"
@@ -606,13 +608,13 @@ export function EditorOverlay({ mode, curGraphPos }: OverlayProps) {
 interface HasTryEnterEdit {
   tryEnterEdit(
     nodeId: number,
-    startEdit: (evDown: MouseEvent, evUp: MouseEvent) => void,
+    startEdit: () => void,
   ): void
 }
 
 interface Props {
   node: NodeStruct
-  semanticScale: "readable" | "structural"
+  semanticScale: SemanticScale
   width: number
   height: number
   /**
@@ -663,7 +665,7 @@ export function NodeReact({
             {title.current && textAreaHeight > 0 ? (
               <TextareaAutosize
                 onClick={(ev) => {
-                  tryEnterEdit.tryEnterEdit(node.id, (_downEv, _upEv) => {
+                  tryEnterEdit.tryEnterEdit(node.id, () => {
                     ev.target.focus()
                     const mouseDown = new MouseEvent("mousedown", {
                       clientX: ev.clientX,
