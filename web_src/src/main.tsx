@@ -1,6 +1,7 @@
 import { GraphEditor } from "./components/GraphEditor.tsx"
 import "./App.css"
-import { ObservableGraph } from "./util/graph.ts"
+import { NodeStruct, ObservableGraph } from "./util/graph.ts"
+import { DEFAULT } from "./constants.ts"
 
 const root = document.getElementById("root")!
 root.style.backgroundColor = "black"
@@ -9,39 +10,25 @@ root.style.height = "100%"
 
 const graph = new ObservableGraph()
 
-graph.addAll([
-  {
-    id: 1,
-    pos: [0, 0],
-    dims: [1, 1],
-    text:
-      "Started his hearted any civilly. So me by marianne admitted speaking. Men bred fine call ask. Cease one miles truth day above seven. Suspicion sportsmen provision suffering mrs saw engrossed something. Snug soon he on plan in be dine some.\n" +
-      "Greatest properly off ham exercise all. Unsatiable invitation its possession nor off. All difficulty estimating unreserved increasing the solicitude. Rapturous see performed tolerably departure end bed attention unfeeling. On unpleasing principles alteration of. Be at performed preferred determine collected. Him nay acuteness discourse listening estimable our law. Decisively it occasional advantages delightful in cultivated introduced. Like law mean form are sang loud lady put.",
-    factualDependencies: [],
-  },
-  {
-    id: 2,
-    pos: [1, 0],
-    dims: [0.5, 0.5],
-    text: "Node 2",
-    factualDependencies: [1],
-  },
-  {
-    id: 3,
-    pos: [1.5, 1],
-    dims: [0.5, 0.5],
-    text: "Node 3",
-    factualDependencies: [1],
-  },
-  {
-    id: 4,
-    pos: [-1.5, 0],
-    dims: [1, 1],
-    text: "Node 4",
-    factualDependencies: [],
-  },
-])
+let testGraph: NodeStruct[] | string | null = localStorage.getItem("testgraph")
+if (!testGraph) {
+  localStorage.setItem('testgraph', JSON.stringify(DEFAULT))
+  testGraph = DEFAULT
+} else {
+  testGraph = JSON.parse(testGraph)
+}
 
-const editor = new GraphEditor(root, graph, () => {})
-editor.moveCenter([1.0, 0.7])
+console.log(testGraph)
+
+graph.addAll(testGraph as NodeStruct[])
+graph.listen(() => {
+  localStorage.setItem('testgraph', JSON.stringify([...graph.nodes()]))
+})
+
+setInterval(() => {
+  localStorage.setItem('testgraph', JSON.stringify([...graph.nodes()]))
+}, 1000)
+
+const editor = new GraphEditor(root, graph, () => {}, {localStorageStateKey: 'grapheditor'})
+// editor.moveCenter([1.0, 0.7])
 editor.focus()

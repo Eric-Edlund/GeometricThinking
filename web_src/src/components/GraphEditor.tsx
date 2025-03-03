@@ -8,7 +8,6 @@ import { ObservableGraph, NodeStruct } from "../util/graph"
 
 type SemanticScale = "readable" | "structural" | "constellation"
 
-
 // Debug
 const NODE_ALPHA = 1.0
 const DRAW_GRID = true
@@ -22,6 +21,10 @@ enum Mode {
   Edit = "edit",
 }
 
+export interface EditorConfig {
+  localStorageStateKey?: string
+}
+
 /**
  * Handles user input.
  *
@@ -30,6 +33,7 @@ enum Mode {
  * Both graph and client coords are 0,0 in the top left.
  */
 export class GraphEditor implements HasTryEnterEdit {
+  private readonly localStorageKey: string | null = null
   private readonly el: HTMLElement
   // Node id to els
   private graph = new ObservableGraph()
@@ -56,6 +60,7 @@ export class GraphEditor implements HasTryEnterEdit {
   private mouseUpPos: Vec2 | null = null
   private mouseDownOnBackground = false
   private mousePos: Vec2 | null = null
+  private movingNode: number | null = null
 
   private widthAnimation = new ScalarAnimation(0, {
     duration: ANIMATION_DURATION,
@@ -75,21 +80,49 @@ export class GraphEditor implements HasTryEnterEdit {
 
   private mode = Mode.View
 
-  constructor(el: HTMLElement, g: Graph, _publishGraph: (g: ObservableGraph) => void) {
+  constructor(
+    el: HTMLElement,
+    g: ObservableGraph,
+    _publishGraph: (g: ObservableGraph) => void,
+    config?: Partial<EditorConfig>
+  ) {
     if (this.lineCanvas.getContext("2d") == null) {
       console.error("Could not create 2d drawing context for canvas.")
       throw new Error()
+    }
+
+    if (config?.localStorageStateKey) {
+      this.localStorageKey = config?.localStorageStateKey
     }
 
     this.el = el
     this.graph = g
     this.graph.listen(() => this.readGraphState())
     this.readGraphState()
+    let initWidth = el.clientWidth / (10 * 40)
+    let initCenter = [0, 0]
+    if (this.localStorageKey) {
+      let storage = localStorage.getItem(this.localStorageKey)
+      storage &&= JSON.parse(storage)
+      if (storage?.width) {
+        initWidth = storage!.width
+      }
+      if (storage?.center) {
+        initCenter = storage!.center
+      }
+    }
     // Fit 3 40ch blocks
-    this.widthAnimation.setTarget(el.clientWidth / (10 * 40))
+    this.widthAnimation.setTarget(initWidth)
     this.widthAnimation.finishNow()
+    this.centerAnimation.setTarget(initCenter)
+    this.centerAnimation.finishNow()
     this.initEl()
     this.draw()
+  }
+
+  hintMoveNode(nodeId: number) {
+    console.log("Moving node", nodeId)
+    this.movingNode = nodeId
   }
 
   /**
@@ -167,6 +200,7 @@ export class GraphEditor implements HasTryEnterEdit {
       this.mouseDownOnBackground = false
       this.mouseDown = false
       this.mouseUpPos = [ev.clientX, ev.clientY]
+      this.movingNode = null
       if (this.mode == Mode.View) {
         const travel = distance(this.mouseDownPos!, [ev.clientX, ev.clientY])
         if (travel < 5) {
@@ -198,6 +232,11 @@ export class GraphEditor implements HasTryEnterEdit {
       } else if (this.mode === Mode.Edit) {
         if (this.mouseDownOnBackground) {
           applyMovement()
+        } else if (this.movingNode) {
+          const scaleFactor = this.width / this.el.clientWidth
+          const node = this.graph.get(this.movingNode)!
+          node.pos[0] += ev.movementX * scaleFactor
+          node.pos[1] += ev.movementY * scaleFactor
         }
       }
     })
@@ -223,6 +262,7 @@ export class GraphEditor implements HasTryEnterEdit {
     )
     this.el.addEventListener("mouseleave", () => {
       this.mousePos = null
+      this.movingNode = null
       this.mouseDownOnBackground = false
       this.mouseDown = false
       this.mouseUpPos = null
@@ -351,9 +391,13 @@ export class GraphEditor implements HasTryEnterEdit {
   }
 
   createNode() {
-    console.log("Create node")
-    this.graph
-    this.draw()
+    this.graph.add({
+      id: this.graph.nextId(),
+      pos: [this.center[0], this.center[1]],
+      dims: [1, 1],
+      text: "",
+      factualDependencies: [],
+    } satisfies NodeStruct)
   }
 
   private intoGraphSpace(clientPos: Vec2, customGraphWidth?: number): Vec2 {
@@ -397,6 +441,13 @@ export class GraphEditor implements HasTryEnterEdit {
       if (this.centerAnimation.inProgress()) {
         requestFrame = true
       }
+    }
+
+    if (this.localStorageKey) {
+      localStorage.setItem(this.localStorageKey, JSON.stringify({
+        center: this.center,
+        width: this.width,
+      }))
     }
 
     this.overlayReact.render(
@@ -461,9 +512,11 @@ export class GraphEditor implements HasTryEnterEdit {
       if (["readable", "structural"].includes(semanticScale)) {
         // When we zoom out, the margin should be reduced to improve positional accuracy
         const margin = Math.min(8, 0.5 * graphToClient)
+        const nWidth = node.dims[0] * graphToClient
+        const nHeight = node.dims[1] * graphToClient
         applyCss(nEl, {
-          width: px(node.dims[0] * graphToClient),
-          height: px(node.dims[1] * graphToClient),
+          width: px(nWidth),
+          height: px(nHeight),
           left: px(clientCoords[0]),
           top: px(clientCoords[1]),
           padding: px(margin),
@@ -473,9 +526,10 @@ export class GraphEditor implements HasTryEnterEdit {
           <NodeReact
             node={node}
             semanticScale={semanticScale}
-            width={nEl.clientWidth - 2 * margin}
-            height={nEl.clientHeight - 2 * margin}
+            width={nWidth - 2 * margin}
+            height={nHeight - 2 * margin}
             tryEnterEdit={this}
+            editor={this}
           />,
         )
       } else {
@@ -597,7 +651,7 @@ export function EditorOverlay({ mode, curGraphPos, editor }: OverlayProps) {
         </Typography>
       ) : null}
       <Box sx={{ position: "absolute", bottom: 1, width: "100%" }}>
-        <IconButton onMouseDown={editor.createNode}>
+        <IconButton onMouseDown={() => editor.createNode()}>
           <Add color="primary" fontSize="large" />
         </IconButton>
       </Box>
@@ -619,6 +673,7 @@ interface Props {
    * edit it, calls this function.
    */
   tryEnterEdit: HasTryEnterEdit
+  editor: GraphEditor
 }
 
 /**
@@ -630,6 +685,7 @@ export function NodeReact({
   width,
   height,
   tryEnterEdit,
+  editor,
 }: Props) {
   const title = useRef(null)
   const margin = 8
@@ -653,6 +709,9 @@ export function NodeReact({
           width: width,
           height: height,
         }}
+        onMouseDown={() => {
+          editor.hintMoveNode(node.id)
+        }}
       >
         {semanticScale == "readable" ? (
           <>
@@ -661,30 +720,17 @@ export function NodeReact({
             </Typography>
             {title.current && textAreaHeight > 0 ? (
               <TextareaAutosize
+                onMouseDown={(ev) => {
+                  ev.stopPropagation()
+                }}
                 onClick={(ev) => {
                   tryEnterEdit.tryEnterEdit(node.id, () => {
                     ev.target.focus()
-                    const mouseDown = new MouseEvent("mousedown", {
-                      clientX: ev.clientX,
-                      clientY: ev.clientY,
-                    })
-                    ev.target.dispatchEvent(mouseDown)
-                    const mouseUp = new MouseEvent("mouseup", {
-                      clientX: ev.clientX,
-                      clientY: ev.clientY,
-                    })
-                    ev.target.dispatchEvent(mouseUp)
-
-                    ev.target.dispatchEvent(
-                      new MouseEvent("click", {
-                        clientX: ev.clientX,
-                        clientY: ev.clientY,
-                      }),
-                    )
                   })
                 }}
                 onChange={(e) => {
                   node.text = e.target.value
+                  // editor.graph.markDirty(node.id)
                 }}
                 defaultValue={node.text}
                 style={{
