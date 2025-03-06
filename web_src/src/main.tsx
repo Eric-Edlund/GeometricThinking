@@ -30,5 +30,4 @@ setInterval(() => {
 }, 1000)
 
 const editor = new GraphEditor(root, graph, () => {}, {localStorageStateKey: 'grapheditor'})
-// editor.moveCenter([1.0, 0.7])
 editor.focus()

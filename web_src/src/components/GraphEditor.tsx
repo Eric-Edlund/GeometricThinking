@@ -5,8 +5,9 @@ import { Box, IconButton, TextareaAutosize, Typography } from "@mui/material"
 import { useRef } from "react"
 import { ScalarAnimation, Vec2Animation } from "../util/animation"
 import { ObservableGraph, NodeStruct } from "../util/graph"
+import { NodeEl, NodeHintsReceiver } from "./Node"
 
-type SemanticScale = "readable" | "structural" | "constellation"
+export type SemanticScale = "readable" | "structural" | "constellation"
 
 // Debug
 const NODE_ALPHA = 1.0
@@ -32,12 +33,12 @@ export interface EditorConfig {
  *
  * Both graph and client coords are 0,0 in the top left.
  */
-export class GraphEditor implements HasTryEnterEdit {
+export class GraphEditor implements NodeHintsReceiver {
   private readonly localStorageKey: string | null = null
   private readonly el: HTMLElement
   // Node id to els
   private graph = new ObservableGraph()
-  private readonly nodes = new Map<number, [HTMLElement, Root]>()
+  private readonly nodes = new Map<number, [HTMLElement, NodeEl]>()
   private readonly lineCanvas: HTMLCanvasElement =
     document.createElement("canvas")
   private readonly overlayDiv = document.createElement("div")
@@ -78,13 +79,13 @@ export class GraphEditor implements HasTryEnterEdit {
     }
   }
 
-  private mode = Mode.View
+  private mode = Mode.Edit
 
   constructor(
     el: HTMLElement,
     g: ObservableGraph,
     _publishGraph: (g: ObservableGraph) => void,
-    config?: Partial<EditorConfig>
+    config?: Partial<EditorConfig>,
   ) {
     if (this.lineCanvas.getContext("2d") == null) {
       console.error("Could not create 2d drawing context for canvas.")
@@ -120,8 +121,17 @@ export class GraphEditor implements HasTryEnterEdit {
     this.draw()
   }
 
+  hintEditNode(id: number): boolean {
+    const clickTravel = distance(this.mouseDownPos!, this.mouseUpPos!)
+    if (this.mode == Mode.View && clickTravel < 5) {
+      this.mode = Mode.Edit
+      this.draw()
+      return true
+    }
+    return false
+  }
+
   hintMoveNode(nodeId: number) {
-    console.log("Moving node", nodeId)
     this.movingNode = nodeId
   }
 
@@ -150,7 +160,7 @@ export class GraphEditor implements HasTryEnterEdit {
       const nEl = newNodeEl()
       nEl.style.zIndex = "1"
       this.el.appendChild(nEl)
-      this.nodes.set(n.id, [nEl, createRoot(nEl)])
+      this.nodes.set(n.id, [nEl, new NodeEl(nEl, n, this)])
     }
 
     // Let the nodes attach to the dom and render so we know their size.
@@ -201,14 +211,6 @@ export class GraphEditor implements HasTryEnterEdit {
       this.mouseDown = false
       this.mouseUpPos = [ev.clientX, ev.clientY]
       this.movingNode = null
-      if (this.mode == Mode.View) {
-        const travel = distance(this.mouseDownPos!, [ev.clientX, ev.clientY])
-        if (travel < 5) {
-          // It's a stationary click
-          // TODO: If it was an attempt to edit a node, switch to edit mode
-          // and pass a click event to the correct node
-        }
-      }
     })
     this.el.addEventListener("mousemove", (ev) => {
       this.mousePos = this.intoGraphSpace([ev.clientX, ev.clientY])
@@ -282,6 +284,9 @@ export class GraphEditor implements HasTryEnterEdit {
     document.addEventListener(
       "wheel",
       (ev) => {
+        if (this.mode == Mode.Edit && !ev.ctrlKey) {
+          return
+        }
         const clientToGraph = this.width / this.el.clientWidth
         // Client pixels
         let deltaX: number, deltaY: number, deltaZoom: number
@@ -354,7 +359,8 @@ export class GraphEditor implements HasTryEnterEdit {
         // This only gets called if a click is not consumed by a node or earlier
         const travel = distance(this.mouseDownPos!, [ev.clientX, ev.clientY])
         if (travel < 5 && this.mode == Mode.Edit) {
-          this.mode = Mode.View
+          // TODO: Revisit modes
+          // this.mode = Mode.View
           this.draw()
         }
       },
@@ -379,15 +385,6 @@ export class GraphEditor implements HasTryEnterEdit {
       resizeLayers()
       this.draw()
     })
-  }
-
-  tryEnterEdit(_nodeId: number, cb: () => void) {
-    const clickTravel = distance(this.mouseDownPos!, this.mouseUpPos!)
-    if (this.mode == Mode.View && clickTravel < 5) {
-      this.mode = Mode.Edit
-      this.draw()
-      cb()
-    }
   }
 
   createNode() {
@@ -444,14 +441,18 @@ export class GraphEditor implements HasTryEnterEdit {
     }
 
     if (this.localStorageKey) {
-      localStorage.setItem(this.localStorageKey, JSON.stringify({
-        center: this.center,
-        width: this.width,
-      }))
+      localStorage.setItem(
+        this.localStorageKey,
+        JSON.stringify({
+          center: this.center,
+          width: this.width,
+        }),
+      )
     }
 
     this.overlayReact.render(
       <EditorOverlay
+        zIndex={this.overlayDiv.style.zIndex}
         mode={this.mode}
         curGraphPos={this.mousePos}
         editor={this}
@@ -461,9 +462,9 @@ export class GraphEditor implements HasTryEnterEdit {
     // Determine scale
     let semanticScale: SemanticScale = "readable"
     const cssPixelsPerGraphUnit = this.el.clientWidth / this.width
-    if (cssPixelsPerGraphUnit > 96) {
+    if (cssPixelsPerGraphUnit > 250) {
       semanticScale = "readable"
-    } else if (cssPixelsPerGraphUnit > 50) {
+    } else if (cssPixelsPerGraphUnit > 20) {
       semanticScale = "structural"
     } else {
       semanticScale = "constellation"
@@ -505,8 +506,8 @@ export class GraphEditor implements HasTryEnterEdit {
     }
 
     for (const [id, node] of this.graph.entries()) {
-      const [nEl, root] = this.nodes.get(id)!
-      const clientCoords = this.intoClientSpace(node.pos)
+      const [nEl, elManager] = this.nodes.get(id)!
+      let clientCoords = this.intoClientSpace(node.pos)
       const graphToClient = this.el.clientWidth / this.width
 
       if (["readable", "structural"].includes(semanticScale)) {
@@ -514,24 +515,12 @@ export class GraphEditor implements HasTryEnterEdit {
         const margin = Math.min(8, 0.5 * graphToClient)
         const nWidth = node.dims[0] * graphToClient
         const nHeight = node.dims[1] * graphToClient
-        applyCss(nEl, {
-          width: px(nWidth),
-          height: px(nHeight),
-          left: px(clientCoords[0]),
-          top: px(clientCoords[1]),
-          padding: px(margin),
-          display: "block",
-        })
-        root.render(
-          <NodeReact
-            node={node}
-            semanticScale={semanticScale}
-            width={nWidth - 2 * margin}
-            height={nHeight - 2 * margin}
-            tryEnterEdit={this}
-            editor={this}
-          />,
-        )
+        clientCoords = add(clientCoords, [margin, margin])
+
+        elManager.setPos(clientCoords)
+        elManager.setDims([nWidth - 2 * margin, nHeight - 2 * margin])
+        elManager.setSemanticScale(semanticScale)
+        elManager.render()
       } else {
         const nodeWidth = node.dims[0] * graphToClient
         const nodeCenter = this.intoClientSpace(
@@ -611,9 +600,15 @@ interface OverlayProps {
   mode: Mode
   curGraphPos: Vec2 | null
   editor: GraphEditor
+  zIndex: any
 }
 
-export function EditorOverlay({ mode, curGraphPos, editor }: OverlayProps) {
+export function EditorOverlay({
+  mode,
+  curGraphPos,
+  editor,
+  zIndex,
+}: OverlayProps) {
   let modeColor
   switch (mode) {
     case Mode.View:
@@ -634,6 +629,8 @@ export function EditorOverlay({ mode, curGraphPos, editor }: OverlayProps) {
         bottom: 0,
         left: 0,
         right: 0,
+        pointerEvents: "none",
+        zIndex: zIndex,
       }}
     >
       {DRAW_CUR_GRAPH_POS ? (
@@ -650,7 +647,15 @@ export function EditorOverlay({ mode, curGraphPos, editor }: OverlayProps) {
           {(curGraphPos ?? [])[1]?.toFixed(1)}
         </Typography>
       ) : null}
-      <Box sx={{ position: "absolute", bottom: 1, width: "100%" }}>
+
+      <Box
+        sx={{
+          position: "absolute",
+          bottom: 1,
+          width: "100%",
+          pointerEvents: "all",
+        }}
+      >
         <IconButton onMouseDown={() => editor.createNode()}>
           <Add color="primary" fontSize="large" />
         </IconButton>
@@ -768,11 +773,14 @@ function newNodeEl() {
   return nEl
 }
 
-function px(a: number) {
+export function px(a: number) {
   return `${a}px`
 }
 
-const applyCss = (el: HTMLElement, config: Partial<CSSStyleDeclaration>) => {
+export const applyCss = (
+  el: HTMLElement,
+  config: Partial<CSSStyleDeclaration>,
+) => {
   for (const [key, value] of Object.entries(config)) {
     // @ts-ignore
     el.style[key] = value

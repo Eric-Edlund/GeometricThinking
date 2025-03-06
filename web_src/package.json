@@ -16,7 +16,8 @@
     "@mui/material": "^6.4.6",
     "easymde": "^2.19.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "textfit": "^2.4.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",
