@@ -2,7 +2,7 @@ import { NodeStruct } from "../util/graph"
 import { Vec2 } from "../util/points"
 import { applyCss, px, SemanticScale } from "./GraphEditor"
 
-const DEBUG_SHOW_ID = false
+const DEBUG_SHOW_ID = true
 
 export interface NodeHintsReceiver {
   /**
@@ -88,10 +88,15 @@ export class NodeEl {
 
   render() {
     const padding = 8
+    let fullTitle = false
     let titleHeight = 2 * padding + 24
     if (titleHeight * 2 >= this.dims[1]) {
       titleHeight = this.dims[1]
+      fullTitle = true
     }
+
+    const showBorder = [37, 38, 39].includes(this.node.id)
+    const connColor = '#0f0f8fff'
 
     applyCss(this.el, {
       width: px(this.dims[0]),
@@ -100,12 +105,16 @@ export class NodeEl {
       top: px(this.pos[1]),
       display: "flex",
       flexDirection: 'column',
-      backgroundColor: "rgb(15% 15% 15%)",
       borderRadius: "0.5em",
       overflow: "hidden",
-      padding: '0',
+      padding: showBorder ? '1px' : '0px',
       zIndex: '1',
-      border: this.semanticScale === "readable" ? '1px darkslategray solid' : 'none',
+      border: this.semanticScale === "readable" && !showBorder ? '1px darkslategray solid' : 'none',
+      backgroundColor: showBorder ? '' : '#030303',
+      backgroundImage: showBorder ? (
+        `radial-gradient(at 50% 0%, ${connColor}, #03030300 95%)`
+        + `, radial-gradient(at 50% 100%, ${connColor} 10%, #03030300)`
+      ) : 'none',
     })
 
     this.title.textContent = this.node.text.substring(0,this.node.text.indexOf('\n'))
@@ -114,14 +123,16 @@ export class NodeEl {
     }
 
     applyCss(this.title, {
-      maxWidth: px(this.dims[0]),
       width: px(this.dims[0]),
-      minHeight: px(titleHeight),
       height: px(titleHeight),
       padding: px(padding),
+      // Prevents the background gradient from drawing between
+      // the title and text content area
+      marginBottom: showBorder && !fullTitle ? '-1px' : '0px', 
       display: this.semanticScale == "readable" ? "none" : "block",
       color: "white",
       boxSizing: 'border-box',
+      backgroundColor: '#212121',
     })
 
     this.content.value = this.node.text

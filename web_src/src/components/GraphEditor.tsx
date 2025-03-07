@@ -554,9 +554,11 @@ export class GraphEditor implements NodeHintsReceiver {
       }
     }
 
+    ctx.strokeStyle = "white"
+
     for (const [id, node] of this.graph.entries()) {
       const nEl = this.nodes.get(id)![0]
-      for (const depId of node.factualDependencies) {
+      for (const depId of node.factualDependencies ?? []) {
         const dep = this.nodes.get(depId)![0]
 
         const srcPos: Vec2 = [
@@ -586,6 +588,95 @@ export class GraphEditor implements NodeHintsReceiver {
         ctx.stroke()
       }
     }
+
+    for (const seq of this.graph.sequences()) {
+      for (let i = 0; i + 1 < seq.nodes.length; i++) {
+        const a = this.nodes.get(seq.nodes[i])![0]
+        const b = this.nodes.get(seq.nodes[i + 1])![0]
+
+        const srcPos: Vec2 = [
+          a.offsetLeft + 0.5 * a.clientWidth,
+          a.offsetTop + 0.5 * a.clientHeight,
+        ]
+        const destPos: Vec2 = [
+          b.offsetLeft + 0.5 * b.clientWidth,
+          b.offsetTop + 0.5 * b.clientHeight,
+        ]
+
+        ctx.strokeStyle = seq.color
+        ctx.beginPath()
+        ctx.moveTo(srcPos[0], srcPos[1])
+        ctx.lineTo(destPos[0], destPos[1])
+        ctx.closePath()
+        ctx.stroke()
+      }
+    }
+
+    for (const opt of this.graph.optionSets()) {
+      const root = this.nodes.get(opt.root)![0]
+      const srcPos: Vec2 = [
+        root.offsetLeft + 0.5 * root.clientWidth,
+        root.offsetTop + 0.5 * root.clientHeight,
+      ]
+      for (const child of opt.children) {
+        const a = this.nodes.get(child)![0]
+        const destPos: Vec2 = [
+          a.offsetLeft + 0.5 * a.clientWidth,
+          a.offsetTop + 0.5 * a.clientHeight,
+        ]
+        ctx.strokeStyle = "red"
+        ctx.beginPath()
+        ctx.moveTo(srcPos[0], srcPos[1])
+        ctx.lineTo(destPos[0], destPos[1])
+        ctx.closePath()
+        ctx.stroke()
+      }
+    }
+
+    for (const inst of this.graph.instanceSets()) {
+      let left=9999999, top=9999999, bottom=0, right = 0
+      const root = this.nodes.get(inst.root)![0]
+      const rootPos: Vec2 = [
+        root.offsetLeft + 0.5 * root.clientWidth,
+        root.offsetTop + 0.5 * root.clientHeight,
+      ]
+      for (const child of inst.children) {
+        const a = this.nodes.get(child)![0]
+        left = Math.min(left, a.offsetLeft)
+        right = Math.max(right, a.offsetLeft + a.clientWidth)
+        top = Math.min(top, a.offsetTop)
+        bottom = Math.max(bottom, a.offsetTop + a.clientHeight)
+      }
+
+      left -= 10
+      right += 10
+      top -= 10
+      bottom += 10
+
+      ctx.strokeStyle = 'white'
+      ctx.lineWidth = 1
+      // ctx.beginPath()
+      ctx.strokeRect(left, top, right - left, bottom - top)
+
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(rootPos[0], rootPos[1])
+      ctx.lineTo(Math.max(left, right), Math.min(top, bottom))
+      ctx.moveTo(rootPos[0], rootPos[1])
+      ctx.lineTo(Math.min(left, right), Math.max(top, bottom))
+      ctx.closePath()
+      ctx.stroke()
+    }
+
+    // for (const region of this.graph.regions()) {
+    //   const root = this.nodes.get(region.root)![0]
+    //   const leader = this.graph.get(region.root)!
+    //   ctx.font = "50px serif";
+    //   ctx.textAlign = "left"
+    //   ctx.textBaseline = 'top'
+    //   ctx.strokeText(leader.text, root.clientLeft, root.clientTop)
+    //   console.log("Region title")
+    // }
 
     if (requestFrame) {
       this.lastFrameTime = now
