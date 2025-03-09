@@ -103,7 +103,7 @@ export class GraphEditor implements NodeHintsReceiver {
 
     this.el = el
     this.graph = g
-    this.graph.listen((changeNum, diff) =>this.readGraphState(changeNum, diff))
+    this.graph.listen((changeNum, diff) => this.readGraphState(changeNum, diff))
     this.readGraphState()
     let initWidth = el.clientWidth / (10 * 40)
     let initCenter: Vec2 = [0, 0]
@@ -159,7 +159,7 @@ export class GraphEditor implements NodeHintsReceiver {
     this.el.focus()
   }
 
-  private readGraphState(changeNum?: number, _diff?: GraphDiff) {
+  private readGraphState(changeNum?: number, diff?: GraphDiff) {
     if (changeNum !== undefined && changeNum <= this.graphStateNum) {
       return
     }
@@ -167,16 +167,27 @@ export class GraphEditor implements NodeHintsReceiver {
       this.graphStateNum = changeNum
     }
 
-    // Clean
-    this.el.replaceChildren(this.lineCanvas, this.overlayDiv)
-    this.nodes.clear()
+    if (diff) {
+      for (const id of diff.nodes) {
+        if (!this.nodes.has(id)) {
+          const nEl = newNodeEl()
+          nEl.style.zIndex = "1"
+          this.el.appendChild(nEl)
+          this.nodes.set(id, [nEl, new NodeEl(nEl, this.graph.get(id)!, this)])
+        }
+      }
+    } else {
+      // Clean
+      this.el.replaceChildren(this.lineCanvas, this.overlayDiv)
+      this.nodes.clear()
 
-    // Add new
-    for (const n of this.graph.nodes()) {
-      const nEl = newNodeEl()
-      nEl.style.zIndex = "1"
-      this.el.appendChild(nEl)
-      this.nodes.set(n.id, [nEl, new NodeEl(nEl, n, this)])
+      // Add new
+      for (const n of this.graph.nodes()) {
+        const nEl = newNodeEl()
+        nEl.style.zIndex = "1"
+        this.el.appendChild(nEl)
+        this.nodes.set(n.id, [nEl, new NodeEl(nEl, n, this)])
+      }
     }
 
     // Let the nodes attach to the dom and render so we know their size.
@@ -255,6 +266,8 @@ export class GraphEditor implements NodeHintsReceiver {
           const node = this.graph.get(this.movingNode)!
           node.pos[0] += ev.movementX * scaleFactor
           node.pos[1] += ev.movementY * scaleFactor
+          this.graph.markDirty(node.id)
+          this.graph.notify()
         }
       }
     })
