@@ -10,6 +10,7 @@ import {
   Sequence,
 } from "./util/graph.ts"
 import { DEFAULT } from "./constants.ts"
+import { ServerProxy } from "./util/server.ts"
 
 const root = document.getElementById("root")!
 root.style.backgroundColor = "black"
@@ -60,53 +61,8 @@ graph.listen((_stateNum: number, _diff: GraphDiff) => {
   localStorage.setItem("testgraph", JSON.stringify([...graph.nodes()]))
 })
 
-// Send updates to server
-let serverStateNum = graph.currentState()
-let serverAvailable = true
-graph.listen(sendState)
-async function sendState(stateNum: number, diff: GraphDiff) {
-  if (!serverAvailable) return
-  if (stateNum <= serverStateNum) {
-    return
-  }
-  const graphId = 1
-  serverStateNum = stateNum
-  try {
-    const res = await fetch(`/apiv1/${graphId}/update`, {
-      method: "POST",
-      body: JSON.stringify({
-        graphId: graphId,
-        changed: [...diff.nodes].map((id) => graph.get(id)),
-      }),
-    })
-    console.log("Update response: ", res)
-  } catch {
-    serverAvailable = false
-  }
-}
 
-// Watch for server updates
-;(async () => {
-  const graphId = 1
-
-  while (true) {
-    if (!serverAvailable) return
-    try {
-      const res = await fetch(`/apiv1/${graphId}/watch`)
-      console.log("Received from server: ", res)
-      const obj = await res.json()
-      const {
-        changed: { nodes },
-      } = obj
-
-      serverStateNum = graph.applyChanges(nodes)
-      graph.notify()
-    } catch {
-      serverAvailable = false
-      continue
-    }
-  }
-})()
+new ServerProxy(graph)
 
 const editor = new GraphEditor(root, graph, () => {}, {
   localStorageStateKey: "grapheditor",
