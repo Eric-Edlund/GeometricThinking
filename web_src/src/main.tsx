@@ -81,7 +81,7 @@ async function sendState(stateNum: number, diff: GraphDiff) {
     })
     console.log("Update response: ", res)
   } catch {
-    serverAvailable = falase
+    serverAvailable = false
   }
 }
 
