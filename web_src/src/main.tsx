@@ -1,6 +1,14 @@
 import { GraphEditor } from "./components/GraphEditor.tsx"
 import "./App.css"
-import { GraphDiff, InstanceSet, NodeStruct, ObservableGraph, OptionSet, Region, Sequence } from "./util/graph.ts"
+import {
+  GraphDiff,
+  InstanceSet,
+  NodeStruct,
+  ObservableGraph,
+  OptionSet,
+  Region,
+  Sequence,
+} from "./util/graph.ts"
 import { DEFAULT } from "./constants.ts"
 
 const root = document.getElementById("root")!
@@ -12,7 +20,7 @@ const graph = new ObservableGraph()
 
 let testGraph: NodeStruct[] | string | null = localStorage.getItem("testgraph")
 if (!testGraph) {
-  localStorage.setItem('testgraph', JSON.stringify(DEFAULT))
+  localStorage.setItem("testgraph", JSON.stringify(DEFAULT))
   testGraph = DEFAULT
 } else {
   testGraph = JSON.parse(testGraph)
@@ -49,47 +57,58 @@ graph.addAll(testGraph as NodeStruct[])
 
 // Save locally
 graph.listen((_stateNum: number, _diff: GraphDiff) => {
-  localStorage.setItem('testgraph', JSON.stringify([...graph.nodes()]))
+  localStorage.setItem("testgraph", JSON.stringify([...graph.nodes()]))
 })
 
 // Send updates to server
 let serverStateNum = graph.currentState()
+let serverAvailable = true
 graph.listen(sendState)
 async function sendState(stateNum: number, diff: GraphDiff) {
+  if (!serverAvailable) return
   if (stateNum <= serverStateNum) {
     return
   }
-  const graphId = 1;
-  serverStateNum = stateNum;
-  const res = await fetch(`/apiv1/${graphId}/update`, {
-    method: 'POST',
-    body: JSON.stringify({
-      "graphId": graphId,
-      "changed": [...diff.nodes].map(id => graph.get(id))
-    }),
-  })
-  console.log('Update response: ', res)
+  const graphId = 1
+  serverStateNum = stateNum
+  try {
+    const res = await fetch(`/apiv1/${graphId}/update`, {
+      method: "POST",
+      body: JSON.stringify({
+        graphId: graphId,
+        changed: [...diff.nodes].map((id) => graph.get(id)),
+      }),
+    })
+    console.log("Update response: ", res)
+  } catch {
+    serverAvailable = falase
+  }
 }
 
 // Watch for server updates
-(async () => {
+;(async () => {
   const graphId = 1
 
   while (true) {
-    const res = await fetch(`/apiv1/${graphId}/watch`)
-    console.log('Received from server: ', res)
-    const obj = await res.json()
+    if (!serverAvailable) return
+    try {
+      const res = await fetch(`/apiv1/${graphId}/watch`)
+      console.log("Received from server: ", res)
+      const obj = await res.json()
+      const {
+        changed: { nodes },
+      } = obj
 
-    const {
-      changed: {
-        nodes
-      }
-    } = obj
-
-    serverStateNum = graph.applyChanges(nodes)
-    graph.notify()
+      serverStateNum = graph.applyChanges(nodes)
+      graph.notify()
+    } catch {
+      serverAvailable = false
+      continue
+    }
   }
 })()
 
-const editor = new GraphEditor(root, graph, () => {}, {localStorageStateKey: 'grapheditor'})
+const editor = new GraphEditor(root, graph, () => {}, {
+  localStorageStateKey: "grapheditor",
+})
 editor.focus()
