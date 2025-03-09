@@ -2,7 +2,7 @@ import { NodeStruct } from "../util/graph"
 import { Vec2 } from "../util/points"
 import { applyCss, px, SemanticScale } from "./GraphEditor"
 
-const DEBUG_SHOW_ID = true
+const DEBUG_SHOW_ID = false
 
 export interface NodeHintsReceiver {
   /**
@@ -16,6 +16,11 @@ export interface NodeHintsReceiver {
    * given node's content.
    */
   hintEditNode(id: number): boolean
+
+  /**
+   * The user has made a change to the node's content.
+   */
+  hintDirtyNode(id: number): void
 }
 
 export class NodeEl {
@@ -68,6 +73,7 @@ export class NodeEl {
       if (ev.target) {
         // @ts-ignore
         this.node.text = ev.target.value
+        this.parent.hintDirtyNode(this.node.id)
       }
     })
   }
@@ -96,7 +102,7 @@ export class NodeEl {
     }
 
     const showBorder = [37, 38, 39].includes(this.node.id)
-    const connColor = '#0f0f8fff'
+    const connColor = "#0f0f8fff"
 
     applyCss(this.el, {
       width: px(this.dims[0]),
@@ -104,20 +110,26 @@ export class NodeEl {
       left: px(this.pos[0]),
       top: px(this.pos[1]),
       display: "flex",
-      flexDirection: 'column',
+      flexDirection: "column",
       borderRadius: "0.5em",
       overflow: "hidden",
-      padding: showBorder ? '1px' : '0px',
-      zIndex: '1',
-      border: this.semanticScale === "readable" && !showBorder ? '1px darkslategray solid' : 'none',
-      backgroundColor: showBorder ? '' : '#030303',
-      backgroundImage: showBorder ? (
-        `radial-gradient(at 50% 0%, ${connColor}, #03030300 95%)`
-        + `, radial-gradient(at 50% 100%, ${connColor} 10%, #03030300)`
-      ) : 'none',
+      padding: showBorder ? "1px" : "0px",
+      zIndex: "1",
+      border:
+        this.semanticScale === "readable" && !showBorder
+          ? "1px darkslategray solid"
+          : "none",
+      backgroundColor: showBorder ? "" : "#030303",
+      backgroundImage: showBorder
+        ? `radial-gradient(at 50% 0%, ${connColor}, #03030300 95%)` +
+          `, radial-gradient(at 50% 100%, ${connColor} 10%, #03030300)`
+        : "none",
     })
 
-    this.title.textContent = this.node.text.substring(0,this.node.text.indexOf('\n'))
+    this.title.textContent = this.node.text.substring(
+      0,
+      this.node.text.indexOf("\n"),
+    )
     if (DEBUG_SHOW_ID) {
       this.title.textContent += this.node.id
     }
@@ -128,11 +140,11 @@ export class NodeEl {
       padding: px(padding),
       // Prevents the background gradient from drawing between
       // the title and text content area
-      marginBottom: showBorder && !fullTitle ? '-1px' : '0px', 
+      marginBottom: showBorder && !fullTitle ? "-1px" : "0px",
       display: this.semanticScale == "readable" ? "none" : "block",
       color: "white",
-      boxSizing: 'border-box',
-      backgroundColor: '#212121',
+      boxSizing: "border-box",
+      backgroundColor: "#212121",
     })
 
     this.content.value = this.node.text
@@ -142,7 +154,7 @@ export class NodeEl {
       boxSizing: "border-box",
       height: "100%",
       resize: "none",
-      padding: '4px',
+      padding: "4px",
       backgroundColor: "rgb(10% 10% 10%)",
       color: "white",
       fontSize: "1em",

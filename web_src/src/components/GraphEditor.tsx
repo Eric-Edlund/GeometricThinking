@@ -4,7 +4,7 @@ import { add, avg, distance, scale, subtract, Vec2 } from "../util/points"
 import { Box, IconButton, TextareaAutosize, Typography } from "@mui/material"
 import { useRef } from "react"
 import { ScalarAnimation, Vec2Animation } from "../util/animation"
-import { ObservableGraph, NodeStruct } from "../util/graph"
+import { ObservableGraph, NodeStruct, GraphDiff } from "../util/graph"
 import { NodeEl, NodeHintsReceiver } from "./Node"
 
 export type SemanticScale = "readable" | "structural" | "constellation"
@@ -23,6 +23,9 @@ enum Mode {
 }
 
 export interface EditorConfig {
+  /**
+   * If present, used to store the position and zoom of the editor.
+   */
   localStorageStateKey?: string
 }
 
@@ -36,13 +39,15 @@ export interface EditorConfig {
 export class GraphEditor implements NodeHintsReceiver {
   private readonly localStorageKey: string | null = null
   private readonly el: HTMLElement
-  // Node id to els
   private graph = new ObservableGraph()
+  private graphStateNum: number = this.graph.currentState()
+  // Node id to els
   private readonly nodes = new Map<number, [HTMLElement, NodeEl]>()
   private readonly lineCanvas: HTMLCanvasElement =
     document.createElement("canvas")
   private readonly overlayDiv = document.createElement("div")
   private readonly overlayReact: Root = createRoot(this.overlayDiv)
+
   // In graph coordinates
   private get center(): [number, number] {
     return this.centerAnimation.valueNow()
@@ -98,13 +103,12 @@ export class GraphEditor implements NodeHintsReceiver {
 
     this.el = el
     this.graph = g
-    this.graph.listen(() => this.readGraphState())
+    this.graph.listen((changeNum, diff) =>this.readGraphState(changeNum, diff))
     this.readGraphState()
     let initWidth = el.clientWidth / (10 * 40)
-    let initCenter = [0, 0]
+    let initCenter: Vec2 = [0, 0]
     if (this.localStorageKey) {
-      let storage = localStorage.getItem(this.localStorageKey)
-      storage &&= JSON.parse(storage)
+      const storage = JSON.parse(localStorage.getItem(this.localStorageKey)!)
       if (storage?.width) {
         initWidth = storage!.width
       }
@@ -121,7 +125,7 @@ export class GraphEditor implements NodeHintsReceiver {
     this.draw()
   }
 
-  hintEditNode(id: number): boolean {
+  hintEditNode(_id: number): boolean {
     const clickTravel = distance(this.mouseDownPos!, this.mouseUpPos!)
     if (this.mode == Mode.View && clickTravel < 5) {
       this.mode = Mode.Edit
@@ -133,6 +137,11 @@ export class GraphEditor implements NodeHintsReceiver {
 
   hintMoveNode(nodeId: number) {
     this.movingNode = nodeId
+  }
+
+  hintDirtyNode(nodeId: number) {
+    this.graphStateNum = this.graph.markDirty(nodeId)
+    this.graph.notify()
   }
 
   /**
@@ -150,7 +159,14 @@ export class GraphEditor implements NodeHintsReceiver {
     this.el.focus()
   }
 
-  private readGraphState() {
+  private readGraphState(changeNum?: number, _diff?: GraphDiff) {
+    if (changeNum !== undefined && changeNum <= this.graphStateNum) {
+      return
+    }
+    if (changeNum !== undefined) {
+      this.graphStateNum = changeNum
+    }
+
     // Clean
     this.el.replaceChildren(this.lineCanvas, this.overlayDiv)
     this.nodes.clear()
@@ -634,7 +650,10 @@ export class GraphEditor implements NodeHintsReceiver {
     }
 
     for (const inst of this.graph.instanceSets()) {
-      let left=9999999, top=9999999, bottom=0, right = 0
+      let left = 9999999,
+        top = 9999999,
+        bottom = 0,
+        right = 0
       const root = this.nodes.get(inst.root)![0]
       const rootPos: Vec2 = [
         root.offsetLeft + 0.5 * root.clientWidth,
@@ -653,7 +672,7 @@ export class GraphEditor implements NodeHintsReceiver {
       top -= 10
       bottom += 10
 
-      ctx.strokeStyle = 'white'
+      ctx.strokeStyle = "white"
       ctx.lineWidth = 1
       // ctx.beginPath()
       ctx.strokeRect(left, top, right - left, bottom - top)
@@ -852,7 +871,6 @@ function newNodeEl() {
   nEl.addEventListener(
     "click",
     (ev) => {
-      console.log("Node stopped click")
       ev.stopPropagation()
     },
     { passive: false },
