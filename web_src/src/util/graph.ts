@@ -134,15 +134,15 @@ export class ObservableGraph {
    * Returns the new state id after thes changes are applied.
    */
   applyChanges(changedNodes: NodeStruct[]): number {
-    const dirtyNodes = []
     for (const node of changedNodes) {
       if (this._nodes.has(node.id)) {
         const shared = this._nodes.get(node.id)!
+        shared.pos = node.pos
+        shared.dims = node.dims
         shared.text = node.text
       } else {
         this._nodes.set(node.id, node)
       }
-      dirtyNodes.push(node.id)
       this._pendingDiff.nodes.add(node.id)
     }
 

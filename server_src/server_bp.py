@@ -1,13 +1,10 @@
-from flask import Blueprint, Flask, jsonify, request
-from sqlalchemy import Engine, create_engine, select, MetaData
-import sqlalchemy
+from quart import Blueprint, jsonify, request
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 from schema import Base, Node
-from flask import Flask
-from flask_cors import CORS, cross_origin
 from asyncio import Event
 from dataclasses import dataclass, field
-
+import asyncio
 
 def node_to_dict(node: Node):
     return {
@@ -48,14 +45,16 @@ class GraphProxy:
         for node in nodes:
             self._state[node.id] = node_to_dict(node)
 
-        print(self._state)
-
+        print('Updated, sending update')
         self._changeEvent.set()
         self._changeEvent.clear()
 
         return self._stateNum
 
-    async def watch(self):
+    async def watch(self, stateNum: int):
+        if stateNum < self._stateNum:
+            return
+        assert stateNum <= self._stateNum
         await self._changeEvent.wait()
 
 
@@ -67,11 +66,12 @@ def RealtimeGraphServer(engine: Engine) -> Blueprint:
     graph1 = GraphProxy(engine, 1)
 
     @bp.get('/<graph_id>/get')
-    def get_graph(graph_id: str):
+    async def get_graph(graph_id: str):
         assert graph_id == '1', f"{graph_id}"
 
         return jsonify({
                 'graphId': 1,
+                'changeId': graph1.currentStateNum(),
                 'nodes': [{
                     'id': n['id'],
                     'pos': [n['x'], n['y']],
@@ -82,15 +82,17 @@ def RealtimeGraphServer(engine: Engine) -> Blueprint:
 
 
     @bp.post('/<graph_id>/update')
-    def update_graph(graph_id: str):
+    async def update_graph(graph_id: str):
         assert graph_id == '1'
 
-        req = request.get_json()
+        req = await request.get_json()
 
         match req:
             case {
             "graphId": 1,
-            "changed": nodes,
+            "changed": {
+                "nodes": nodes,
+            },
             }:
                 graph1.update([Node(
                     id=n['id'],
@@ -104,19 +106,28 @@ def RealtimeGraphServer(engine: Engine) -> Blueprint:
             case _:
                 raise ValueError()
 
-        return jsonify({'status': 'ok'})
+        return jsonify({'changeId': graph1.currentStateNum()})
 
-    # @bp.get('/<graph_id>/watch')
-    # async def watch_graph(graph_id: str):
-    #     assert graph_id == '1'
-    #     await graph1_updated.wait()
-    #
-    #     return jsonify({
-    #         "graphId": 1,
-    #         "changed": {
-    #             "nodes": 
-    #         }
-    #     })
+    @bp.get('/<graph_id>/watch/<change_id>')
+    async def watch_graph(graph_id: str, change_id: str):
+        assert graph_id == '1'
+        state_id: int = int(change_id)
+
+        await graph1.watch(state_id)
+        print('Watched', state_id, '->', graph1.currentStateNum())
+
+        return jsonify({
+            "graphId": 1,
+            "changeId": graph1.currentStateNum(),
+            "changed": {
+                'nodes': [{
+                    'id': n['id'],
+                    'pos': [n['x'], n['y']],
+                    'dims': [n['width'], n['height']],
+                    'text': n['text'],
+                } for n in graph1.get()],
+            }
+        })
 
 
     return bp

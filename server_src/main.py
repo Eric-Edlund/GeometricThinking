@@ -1,9 +1,8 @@
-from flask import Flask
+from quart import Quart
 from sqlalchemy import Engine, create_engine, MetaData, select, func
 from sqlalchemy.orm import Session
 from schema import Base, Node
-from flask import Flask
-from flask_cors import CORS
+from quart_cors import cors
 from server_bp import RealtimeGraphServer
 
 
@@ -49,15 +48,15 @@ def main():
     m.reflect(bind=e)
     print(m.tables.keys())
 
-    app = Flask(__name__)
+    app = Quart(__name__)
 
     service = RealtimeGraphServer(e)
     app.register_blueprint(service, url_prefix="/apiv1")
 
-    cors = CORS(app, resources={r"*": {"origins": "*"}}) # allow CORS for all domains on all routes.
+    _ = cors(app)
     app.config['CORS_HEADERS'] = 'Content-Type'
 
-    app.run(debug=True)
+    app.run(debug=True, threaded=False)
 
 
 if __name__ == '__main__':

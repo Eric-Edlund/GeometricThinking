@@ -6,27 +6,27 @@ function host(): string {
 
 export class ServerProxy {
   private graphStateNum: number
+  private serverStateNumber: number = -1
   private serverAvailable = true
   private graph: ObservableGraph
 
   constructor(graph: ObservableGraph) {
     this.graph = graph
     this.graphStateNum = this.graph.currentState()
-
-    this.graph.listen((stateNum, diff) => this.sendState(stateNum, diff))
-    // setInterval(() => {
-    //   this.longPollUpdates()
-    // })
   }
 
   async initialSync() {
     const graphId = 1
     const res = await fetch(`${host()}/apiv1/${graphId}/get`)
     const obj = await res.json()
-    console.log(obj)
+
+    this.serverStateNumber = obj.changeId
 
     this.graph.applyChanges(obj.nodes)
     this.graph.notify()
+
+    this.graph.listen((stateNum, diff) => this.sendState(stateNum, diff))
+    this.longPollUpdates()
   }
 
   private async sendState(stateNum: number, diff: GraphDiff) {
@@ -39,16 +39,19 @@ export class ServerProxy {
 
     const msg = JSON.stringify({
       graphId: graphId,
-      changed: [...diff.nodes].map((id) => this.graph.get(id)),
+      changed: {
+        nodes: [...diff.nodes].map((id) => this.graph.get(id))
+      },
     })
-    console.log('Sending to server:', msg)
 
     try {
       const res = await fetch(`${host()}/apiv1/${graphId}/update`, {
         method: "POST",
-        headers: {'Content-Type': 'application/json'},
+        headers: { "Content-Type": "application/json" },
         body: msg,
       })
+      const json = await res.json()
+      this.serverStateNumber = json.changeId
     } catch {
       this.serverAvailable = false
     }
@@ -59,15 +62,28 @@ export class ServerProxy {
     const graphId = 1
 
     try {
-      const res = await fetch(`${host()}/apiv1/${graphId}/watch`)
+      const res = await fetch(
+        `${host()}/apiv1/${graphId}/watch/${this.serverStateNumber}`,
+        {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+        },
+      )
       const obj = await res.json()
       const {
         changed: { nodes },
       } = obj
 
-      this.graphStateNum = this.graph.applyChanges(nodes)
-      this.graph.notify()
-    } catch {
+      if (this.serverStateNumber != obj.changeId) {
+        this.serverStateNumber = obj.changeId
+        this.graphStateNum = this.graph.applyChanges(nodes)
+        this.graph.notify()
+      }
+      
+      setTimeout(() => {
+        this.longPollUpdates()
+      }, 500)
+    } catch (e) {
       this.serverAvailable = false
     }
   }

@@ -175,6 +175,7 @@ export class GraphEditor implements NodeHintsReceiver {
           this.el.appendChild(nEl)
           this.nodes.set(id, [nEl, new NodeEl(nEl, this.graph.get(id)!, this)])
         }
+        
       }
     } else {
       // Clean
