@@ -1,14 +1,6 @@
 import { GraphEditor } from "./components/GraphEditor.tsx"
 import "./App.css"
-import {
-  GraphDiff,
-  InstanceSet,
-  NodeStruct,
-  ObservableGraph,
-  OptionSet,
-  Region,
-  Sequence,
-} from "./util/graph.ts"
+import { GraphDiff, NodeStruct, ObservableGraph } from "./util/graph.ts"
 import { DEFAULT } from "./constants.ts"
 import { ServerProxy } from "./util/server.ts"
 
@@ -19,17 +11,28 @@ root.style.height = "100%"
 
 const graph = new ObservableGraph()
 
-let testGraph: NodeStruct[] | string | null = localStorage.getItem("testgraph")
-if (!testGraph) {
-  localStorage.setItem("testgraph", JSON.stringify(DEFAULT))
-  testGraph = DEFAULT
-} else {
-  testGraph = JSON.parse(testGraph)
+function loadGraphFromLocalStorage() {
+  let testGraph: NodeStruct[] | string | null =
+    localStorage.getItem("testgraph")
+  if (!testGraph) {
+    localStorage.setItem("testgraph", JSON.stringify(DEFAULT))
+    testGraph = DEFAULT
+  } else {
+    testGraph = JSON.parse(testGraph)
+  }
+
+  console.log(testGraph)
+
+  graph.addAll(testGraph as NodeStruct[])
+
+  // Save locally
+  graph.listen((_stateNum: number, _diff: GraphDiff) => {
+    localStorage.setItem("testgraph", JSON.stringify([...graph.nodes()]))
+  })
 }
 
-console.log(testGraph)
+// loadGraphFromLocalStorage()
 
-graph.addAll(testGraph as NodeStruct[])
 // graph.addSeq({
 //   id: 1,
 //   color: 'lightblue',
@@ -56,13 +59,8 @@ graph.addAll(testGraph as NodeStruct[])
 //   children: [],
 // } satisfies Region)
 
-// Save locally
-graph.listen((_stateNum: number, _diff: GraphDiff) => {
-  localStorage.setItem("testgraph", JSON.stringify([...graph.nodes()]))
-})
-
-
-new ServerProxy(graph)
+const server = new ServerProxy(graph)
+server.initialSync()
 
 const editor = new GraphEditor(root, graph, () => {}, {
   localStorageStateKey: "grapheditor",

@@ -1,5 +1,8 @@
 import { GraphDiff, ObservableGraph } from "./graph"
 
+function host(): string {
+  return import.meta.env.VITE_BACKEND_HOST
+}
 
 export class ServerProxy {
   private graphStateNum: number
@@ -11,28 +14,41 @@ export class ServerProxy {
     this.graphStateNum = this.graph.currentState()
 
     this.graph.listen((stateNum, diff) => this.sendState(stateNum, diff))
-    setInterval(() => {
-      this.longPollUpdates()
-    })
+    // setInterval(() => {
+    //   this.longPollUpdates()
+    // })
+  }
+
+  async initialSync() {
+    const graphId = 1
+    const res = await fetch(`${host()}/apiv1/${graphId}/get`)
+    const obj = await res.json()
+    console.log(obj)
+
+    this.graph.applyChanges(obj.nodes)
+    this.graph.notify()
   }
 
   private async sendState(stateNum: number, diff: GraphDiff) {
-    console.log("Send state")
     if (!this.serverAvailable) return
     if (stateNum <= this.graphStateNum) {
       return
     }
     const graphId = 1
     this.graphStateNum = stateNum
+
+    const msg = JSON.stringify({
+      graphId: graphId,
+      changed: [...diff.nodes].map((id) => this.graph.get(id)),
+    })
+    console.log('Sending to server:', msg)
+
     try {
-      const res = await fetch(`/apiv1/${graphId}/update`, {
+      const res = await fetch(`${host()}/apiv1/${graphId}/update`, {
         method: "POST",
-        body: JSON.stringify({
-          graphId: graphId,
-          changed: [...diff.nodes].map((id) => this.graph.get(id)),
-        }),
+        headers: {'Content-Type': 'application/json'},
+        body: msg,
       })
-      console.log("Update response: ", res)
     } catch {
       this.serverAvailable = false
     }
@@ -43,8 +59,7 @@ export class ServerProxy {
     const graphId = 1
 
     try {
-      const res = await fetch(`/apiv1/${graphId}/watch`)
-      console.log("Received from server: ", res)
+      const res = await fetch(`${host()}/apiv1/${graphId}/watch`)
       const obj = await res.json()
       const {
         changed: { nodes },
