@@ -82,7 +82,7 @@ export class ServerProxy {
       
       setTimeout(() => {
         this.longPollUpdates()
-      }, 500)
+      }, 10)
     } catch (e) {
       this.serverAvailable = false
     }
