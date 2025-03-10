@@ -6,3 +6,5 @@ shell.nix
 node_modules
 venv
 /notes
+
+*.db
