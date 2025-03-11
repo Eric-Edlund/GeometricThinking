@@ -101,8 +101,13 @@ export class NodeEl {
       fullTitle = true
     }
 
-    const showBorder = [37, 38, 39].includes(this.node.id)
-    const connColor = "#0f0f8fff"
+    const typed = this.node.type !== undefined
+    const typeColor = {
+      "source": "blue",
+      "source_reference": "lightblue",
+      "claim": "white",
+      "question": "lightgreen",
+    }[this.node.type]
 
     applyCss(this.el, {
       width: px(this.dims[0]),
@@ -113,17 +118,9 @@ export class NodeEl {
       flexDirection: "column",
       borderRadius: "0.5em",
       overflow: "hidden",
-      padding: showBorder ? "1px" : "0px",
       zIndex: "1",
-      border:
-        this.semanticScale === "readable" && !showBorder
-          ? "1px darkslategray solid"
-          : "none",
-      backgroundColor: showBorder ? "" : "#030303",
-      backgroundImage: showBorder
-        ? `radial-gradient(at 50% 0%, ${connColor}, #03030300 95%)` +
-          `, radial-gradient(at 50% 100%, ${connColor} 10%, #03030300)`
-        : "none",
+      border: typed ? `1px ${typeColor} solid`
+          : "1px darkslategray solid",
     })
 
     this.title.textContent = this.node.text.substring(
@@ -140,7 +137,7 @@ export class NodeEl {
       padding: px(padding),
       // Prevents the background gradient from drawing between
       // the title and text content area
-      marginBottom: showBorder && !fullTitle ? "-1px" : "0px",
+      marginBottom: typed && !fullTitle ? "-1px" : "0px",
       display: this.semanticScale == "readable" ? "none" : "block",
       color: "white",
       boxSizing: "border-box",

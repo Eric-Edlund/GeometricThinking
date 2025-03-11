@@ -31,7 +31,7 @@ function loadGraphFromLocalStorage() {
   })
 }
 
-// loadGraphFromLocalStorage()
+loadGraphFromLocalStorage()
 
 // graph.addSeq({
 //   id: 1,

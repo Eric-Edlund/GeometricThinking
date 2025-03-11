@@ -175,7 +175,6 @@ export class GraphEditor implements NodeHintsReceiver {
           this.el.appendChild(nEl)
           this.nodes.set(id, [nEl, new NodeEl(nEl, this.graph.get(id)!, this)])
         }
-        
       }
     } else {
       // Clean
@@ -425,6 +424,7 @@ export class GraphEditor implements NodeHintsReceiver {
       text: "",
       factualDependencies: [],
     } satisfies NodeStruct)
+    this.graph.notify()
   }
 
   private intoGraphSpace(clientPos: Vec2, customGraphWidth?: number): Vec2 {

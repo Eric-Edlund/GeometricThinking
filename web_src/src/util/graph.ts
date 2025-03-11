@@ -7,6 +7,7 @@ export interface NodeStruct {
   dims: [number, number]
   text: string
 
+  type?: string
   factualDependencies?: number[]
 }
 

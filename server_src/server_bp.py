@@ -3,8 +3,6 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 from schema import Base, Node
 from asyncio import Event
-from dataclasses import dataclass, field
-import asyncio
 
 def node_to_dict(node: Node):
     return {
@@ -14,6 +12,7 @@ def node_to_dict(node: Node):
         'width': node.width,
         'height': node.height,
         'text': node.text,
+        'type': node.node_type or 'source',
     }
 
 
@@ -77,6 +76,7 @@ def RealtimeGraphServer(engine: Engine) -> Blueprint:
                     'pos': [n['x'], n['y']],
                     'dims': [n['width'], n['height']],
                     'text': n['text'],
+                    'type': n['type'],
                 } for n in graph1.get()],
             })
 
@@ -101,6 +101,7 @@ def RealtimeGraphServer(engine: Engine) -> Blueprint:
                     width=n['dims'][0],
                     height=n['dims'][1],
                     text=n['text'],
+                    node_type=n['type']
                 ) for n in nodes])
 
             case _:
@@ -125,6 +126,7 @@ def RealtimeGraphServer(engine: Engine) -> Blueprint:
                     'pos': [n['x'], n['y']],
                     'dims': [n['width'], n['height']],
                     'text': n['text'],
+                    'type': n['type'],
                 } for n in graph1.get()],
             }
         })

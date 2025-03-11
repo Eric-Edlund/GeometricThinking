@@ -5,4 +5,3 @@ What's the difference between facts and emotions?
 
 What's the difference between emotions and opinions?
 
-
