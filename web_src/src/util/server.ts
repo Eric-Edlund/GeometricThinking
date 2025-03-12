@@ -102,7 +102,7 @@ export class ServerProxy {
         })
       }
 
-      if (this.serverStateNumber != obj.changeId) {
+      if (this.serverStateNumber < obj.changeId) {
         this.serverStateNumber = obj.changeId
         this.graphStateNum = this.graph.applyChanges(nodes)
         this.graph.notify()
