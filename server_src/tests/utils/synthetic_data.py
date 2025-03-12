@@ -1,10 +1,6 @@
-from quart import Quart
-from sqlalchemy import Engine, create_engine, MetaData, select, func
+from sqlalchemy import Engine
 from sqlalchemy.orm import Session
-from schema import Base, Node
-from quart_cors import cors
-from server_bp import RealtimeGraphServer
-
+from src.schema import Node
 
 def insert_synthetic(e: Engine):
     with Session(e) as sess:
@@ -34,30 +30,11 @@ def insert_synthetic(e: Engine):
         sess.commit()
 
 
-def main():
-    e = create_engine('sqlite:///data.db')
-    Base.metadata.create_all(bind=e)
-
-    with Session(e) as sess:
-        node = sess.scalar(select(Node).limit(1))
-        if node is None:
-            print("Building synthetic data.")
-            insert_synthetic(e)
-
-    m = MetaData()
-    m.reflect(bind=e)
-    print(m.tables.keys())
-
-    app = Quart(__name__)
-
-    service = RealtimeGraphServer(e)
-    app.register_blueprint(service, url_prefix="/apiv1")
-
-    _ = cors(app)
-    app.config['CORS_HEADERS'] = 'Content-Type'
-
-    app.run(debug=True, threaded=False)
-
-
-if __name__ == '__main__':
-    main()
+def new_test_node():
+    return Node(
+        x=0,
+        y=0,
+        width=1,
+        height=1,
+        text='test data',
+    )

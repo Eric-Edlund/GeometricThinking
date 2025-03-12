@@ -2,7 +2,7 @@ import { NodeStruct } from "../util/graph"
 import { Vec2 } from "../util/points"
 import { applyCss, px, SemanticScale } from "./GraphEditor"
 
-const DEBUG_SHOW_ID = false
+const DEBUG_SHOW_ID = true
 
 export interface NodeHintsReceiver {
   /**

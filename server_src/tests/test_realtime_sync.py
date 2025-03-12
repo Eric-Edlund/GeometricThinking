@@ -2,18 +2,13 @@ import unittest
 from quart import Quart
 from sqlalchemy import Engine, create_engine, MetaData, select, func
 from sqlalchemy.orm import Session
-from schema import Base, Node
+from src.schema import Base, Node
 from quart_cors import cors
-from server_bp import RealtimeGraphServer
-from main import insert_synthetic
+from src.server_bp import RealtimeGraphServer
 import asyncio
+from tests.util import actually_not_async
+from tests.utils.synthetic_data import insert_synthetic
 
-
-def actually_not_async(fn):
-    def res(*args, **kwargs):
-        return asyncio.run(fn(*args, **kwargs))
-
-    return res
 
 
 class Test(unittest.TestCase):
@@ -22,10 +17,10 @@ class Test(unittest.TestCase):
         e = create_engine('sqlite:///data.db')
         Base.metadata.create_all(bind=e)
         insert_synthetic(e)
-        m = MetaData()
-        m.reflect(bind=e)
         app = Quart(__name__)
-        service = RealtimeGraphServer(e)
+        sess = Session(e)
+        service_context = RealtimeGraphServer(sess)
+        service = service_context.__enter__()
         app.register_blueprint(service, url_prefix="/apiv1")
         _ = cors(app)
         app.config['CORS_HEADERS'] = 'Content-Type'
@@ -81,5 +76,38 @@ class Test(unittest.TestCase):
         await asyncio.sleep(0.5)
         assert watch_triggered
 
-        assert False
+        # Create node assigns ids
+        res = await client.post(f'/apiv1/1/update', json={
+            'graphId': 1,
+            'changeId': 0,
+            'changed': {
+                'nodes': [{
+                    'id': -1,
+                    'text': 'client created node',
+                    'pos': [0, 0],
+                    'dims': [1, 1],
+                }],
+            },
+        })
+        assert res.status_code == 200, f"Failed to create node"
+        change_id = (await res.get_json())['changeId']
 
+        res = await client.get(f'/apiv1/1/watch/{change_id - 1}')
+        json = await res.get_json()
+        assert isinstance(assigned_id := json['id_map']['-1'], int)
+        assert assigned_id > 1
+
+        # TODO: Old client specific ids are still respected
+
+        # Get still works
+        res = await client.get('/apiv1/1/get')
+        assert res.status_code == 200
+        json = await res.get_json()
+
+        # Shutdown persistence works
+        service_context.__exit__(None, None, None)
+
+        with Session(e) as sess:
+            node = sess.get(Node, assigned_id)
+            assert node
+            assert node.text == 'client created node'

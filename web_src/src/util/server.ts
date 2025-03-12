@@ -10,6 +10,9 @@ export class ServerProxy {
   private serverAvailable = true
   private graph: ObservableGraph
 
+  private waitingForUpdateResponse = false
+  private onUpdateResponse: (() => void) | null = null
+
   constructor(graph: ObservableGraph) {
     this.graph = graph
     this.graphStateNum = this.graph.currentState()
@@ -17,16 +20,29 @@ export class ServerProxy {
 
   async initialSync() {
     const graphId = 1
-    const res = await fetch(`${host()}/apiv1/${graphId}/get`)
-    const obj = await res.json()
+    let res, obj;
+    try {
+      res = await fetch(`${host()}/apiv1/${graphId}/get`)
+      obj = await res.json()
+    } catch (e) {
+      this.markServerUnavailable("Problem during initial get" + e)
+      console.error(e)
+      return
+    }
 
     this.serverStateNumber = obj.changeId
 
     this.graph.applyChanges(obj.nodes)
     this.graph.notify()
 
-    this.graph.listen((stateNum, diff) => this.sendState(stateNum, diff))
+    this.graph.listen((stateNum, diff) => {this.sendState(stateNum, diff)})
     this.longPollUpdates()
+  }
+
+  private markServerUnavailable(reason: string) {
+    console.log("=== Server unavailable! ===")
+    console.error(reason)
+    this.serverAvailable = false
   }
 
   private async sendState(stateNum: number, diff: GraphDiff) {
@@ -45,15 +61,18 @@ export class ServerProxy {
     })
 
     try {
+      this.waitingForUpdateResponse = true
       const res = await fetch(`${host()}/apiv1/${graphId}/update`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {"Content-Type": "application/json" },
         body: msg,
       })
       const json = await res.json()
       this.serverStateNumber = json.changeId
     } catch {
-      this.serverAvailable = false
+      this.markServerUnavailable("Problem sending update")
+    } finally {
+      this.waitingForUpdateResponse = false
     }
   }
 
@@ -66,13 +85,22 @@ export class ServerProxy {
         `${host()}/apiv1/${graphId}/watch/${this.serverStateNumber}`,
         {
           method: "GET",
-          headers: { "Content-Type": "application/json" },
+          // headers: { "Content-Type": "application/json" },
         },
       )
       const obj = await res.json()
       const {
         changed: { nodes },
       } = obj
+
+      if (this.waitingForUpdateResponse) {
+        await new Promise<void>((res, _rej) => {
+          this.onUpdateResponse = () => {
+            this.onUpdateResponse = null
+            res()
+          }
+        })
+      }
 
       if (this.serverStateNumber != obj.changeId) {
         this.serverStateNumber = obj.changeId
@@ -84,7 +112,8 @@ export class ServerProxy {
         this.longPollUpdates()
       }, 10)
     } catch (e) {
-      this.serverAvailable = false
+      // this.markServerUnavailable("Problem watching for update " + e)
+      throw e
     }
   }
 }

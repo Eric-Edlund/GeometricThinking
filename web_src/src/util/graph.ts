@@ -49,7 +49,7 @@ export class ObservableGraph {
   private _instanceSets: InstanceSet[] = []
   private _regions: Region[] = []
   private _listeners: ((stateNum: number, changes: GraphDiff) => void)[] = []
-  private _nextId = 1
+  private _nextId = -1
 
   private readonly _pendingDiff: GraphDiff = {nodes: new Set()}
 
@@ -88,16 +88,18 @@ export class ObservableGraph {
   addAll(nodes: NodeStruct[]): number {
     for (const n of nodes) {
       this._nodes.set(n.id, n)
-      this._nextId = Math.max(this._nextId, n.id + 1)
       this._pendingDiff.nodes.add(n.id)
+      if (n.id < this._nextId)
+        this._nextId = n.id - 1
     }
     return ++this._stateNumber
   }
 
   add(n: NodeStruct): number {
     this._nodes.set(n.id, n)
-    this._nextId = Math.max(this._nextId, n.id + 1)
     this._pendingDiff.nodes.add(n.id)
+      if (n.id < this._nextId)
+        this._nextId = n.id - 1
     return ++this._stateNumber
   }
 
@@ -126,9 +128,7 @@ export class ObservableGraph {
   }
 
   nextId() {
-    const result = this._nextId
-    this._nextId++
-    return result
+    return --this._nextId
   }
 
   /**

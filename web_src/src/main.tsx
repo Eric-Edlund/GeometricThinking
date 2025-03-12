@@ -1,6 +1,6 @@
 import { GraphEditor } from "./components/GraphEditor.tsx"
 import "./App.css"
-import { GraphDiff, NodeStruct, ObservableGraph } from "./util/graph.ts"
+import { GraphDiff, InstanceSet, NodeStruct, ObservableGraph, OptionSet, Region, Sequence } from "./util/graph.ts"
 import { DEFAULT } from "./constants.ts"
 import { ServerProxy } from "./util/server.ts"
 
@@ -24,14 +24,13 @@ function loadGraphFromLocalStorage() {
   console.log(testGraph)
 
   graph.addAll(testGraph as NodeStruct[])
+  graph.notify()
 
   // Save locally
   graph.listen((_stateNum: number, _diff: GraphDiff) => {
     localStorage.setItem("testgraph", JSON.stringify([...graph.nodes()]))
   })
 }
-
-loadGraphFromLocalStorage()
 
 // graph.addSeq({
 //   id: 1,
@@ -61,6 +60,9 @@ loadGraphFromLocalStorage()
 
 const server = new ServerProxy(graph)
 server.initialSync()
+
+// loadGraphFromLocalStorage()
+// graph.notify()
 
 const editor = new GraphEditor(root, graph, () => {}, {
   localStorageStateKey: "grapheditor",
