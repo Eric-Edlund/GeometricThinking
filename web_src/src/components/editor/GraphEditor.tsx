@@ -1,26 +1,16 @@
-import { Add } from "@mui/icons-material"
 import { Root, createRoot } from "react-dom/client"
-import { add, avg, distance, scale, subtract, Vec2 } from "../util/points"
-import { Box, IconButton, TextareaAutosize, Typography } from "@mui/material"
-import { useRef } from "react"
-import { ScalarAnimation, Vec2Animation } from "../util/animation"
-import { ObservableGraph, NodeStruct, GraphDiff } from "../util/graph"
+import { add, avg, distance, scale, subtract, Vec2 } from "../../util/points"
+import { ScalarAnimation, Vec2Animation } from "../../util/animation"
+import { ObservableGraph, NodeStruct, GraphDiff } from "../../util/graph"
 import { NodeEl, NodeHintsReceiver } from "./Node"
-
-export type SemanticScale = "readable" | "structural" | "constellation"
+import { Mode, relationColor, SemanticRelation, SemanticScale } from "./common"
+import { EditorOverlay } from "./EditorOverlay"
 
 // Debug
 const NODE_ALPHA = 1.0
 const DRAW_GRID = true
-const DRAW_MODE_INDICATOR = true
-const DRAW_CUR_GRAPH_POS = true
-
 const ANIMATION_DURATION = 200
-
-enum Mode {
-  View = "view",
-  Edit = "edit",
-}
+export const DRAW_CUR_GRAPH_POS = true
 
 export interface EditorConfig {
   /**
@@ -28,6 +18,23 @@ export interface EditorConfig {
    */
   localStorageStateKey?: string
 }
+
+interface ModeVariant {
+  tag: Mode
+}
+
+interface EditModeState extends ModeVariant {
+  tag: Mode.Edit
+}
+interface ViewModeState extends ModeVariant {
+  tag: Mode.View
+}
+interface LineModeState extends ModeVariant {
+  tag: Mode.LineDrawing
+  lineType: SemanticRelation
+}
+
+type ModeState = EditModeState | ViewModeState | LineModeState
 
 /**
  * Handles user input.
@@ -84,7 +91,9 @@ export class GraphEditor implements NodeHintsReceiver {
     }
   }
 
-  private mode = Mode.Edit
+  private mode: ModeState = {
+    tag: Mode.Edit,
+  }
 
   constructor(
     el: HTMLElement,
@@ -127,8 +136,10 @@ export class GraphEditor implements NodeHintsReceiver {
 
   hintEditNode(_id: number): boolean {
     const clickTravel = distance(this.mouseDownPos!, this.mouseUpPos!)
-    if (this.mode == Mode.View && clickTravel < 5) {
-      this.mode = Mode.Edit
+    if (this.mode.tag == Mode.View && clickTravel < 5) {
+      this.mode = {
+        tag: Mode.Edit,
+      }
       this.draw()
       return true
     }
@@ -212,7 +223,7 @@ export class GraphEditor implements NodeHintsReceiver {
       (ev) => {
         this.mouseDown = true
         this.mouseDownPos = [ev.clientX, ev.clientY]
-        if (this.mode == Mode.View) {
+        if (this.mode.tag == Mode.View) {
           // This is for us moving the graph only.
           // This prevents highlighting the nodes
           ev.preventDefault()
@@ -228,7 +239,7 @@ export class GraphEditor implements NodeHintsReceiver {
         this.mouseDown = true
         this.mouseDownOnBackground = true
         this.mouseDownPos = [ev.clientX, ev.clientY]
-        if (this.mode == Mode.Edit) {
+        if (this.mode.tag == Mode.Edit) {
         }
       },
       { passive: false },
@@ -254,11 +265,11 @@ export class GraphEditor implements NodeHintsReceiver {
         this.centerAnimation.finishNow()
         this.draw()
       }
-      if (this.mode === Mode.View) {
+      if (this.mode.tag === Mode.View) {
         if (this.mouseDown) {
           applyMovement()
         }
-      } else if (this.mode === Mode.Edit) {
+      } else if (this.mode.tag === Mode.Edit) {
         if (this.mouseDownOnBackground) {
           applyMovement()
         } else if (this.movingNode) {
@@ -275,15 +286,19 @@ export class GraphEditor implements NodeHintsReceiver {
     this.el.addEventListener(
       "keydown",
       (ev) => {
-        if (this.mode == Mode.View) {
+        if (this.mode.tag === Mode.View) {
           if (ev.key == "i") {
-            this.mode = Mode.Edit
+            this.mode = {
+              tag: Mode.Edit,
+            }
             this.draw()
             ev.preventDefault()
           }
-        } else if (this.mode == Mode.Edit) {
+        } else if (this.mode.tag === Mode.Edit) {
           if (ev.key == "Escape") {
-            this.mode = Mode.View
+            this.mode = {
+              tag: Mode.View,
+            }
             this.draw()
             ev.preventDefault()
           }
@@ -313,7 +328,7 @@ export class GraphEditor implements NodeHintsReceiver {
     document.addEventListener(
       "wheel",
       (ev) => {
-        if (this.mode == Mode.Edit && !ev.ctrlKey) {
+        if (this.mode.tag == Mode.Edit && !ev.ctrlKey) {
           return
         }
         const clientToGraph = this.width / this.el.clientWidth
@@ -387,7 +402,7 @@ export class GraphEditor implements NodeHintsReceiver {
       (ev) => {
         // This only gets called if a click is not consumed by a node or earlier
         const travel = distance(this.mouseDownPos!, [ev.clientX, ev.clientY])
-        if (travel < 5 && this.mode == Mode.Edit) {
+        if (travel < 5 && this.mode.tag === Mode.Edit) {
           // TODO: Revisit modes
           // this.mode = Mode.View
           this.draw()
@@ -425,6 +440,18 @@ export class GraphEditor implements NodeHintsReceiver {
       factualDependencies: [],
     } satisfies NodeStruct)
     this.graph.notify()
+  }
+
+  /**
+   * The user has indicated that they would like to begin drawing connections
+   * between nodes.
+   */
+  enterLineMode(lineType: SemanticRelation) {
+    this.mode = {
+      tag: Mode.LineDrawing,
+      lineType,
+    }
+    this.draw()
   }
 
   private intoGraphSpace(clientPos: Vec2, customGraphWidth?: number): Vec2 {
@@ -483,7 +510,7 @@ export class GraphEditor implements NodeHintsReceiver {
     this.overlayReact.render(
       <EditorOverlay
         zIndex={this.overlayDiv.style.zIndex}
-        mode={this.mode}
+        mode={this.mode.tag}
         curGraphPos={this.mousePos}
         editor={this}
       />,
@@ -633,7 +660,7 @@ export class GraphEditor implements NodeHintsReceiver {
           b.offsetTop + 0.5 * b.clientHeight,
         ]
 
-        ctx.strokeStyle = seq.color
+        ctx.strokeStyle = relationColor('sequence')
         ctx.beginPath()
         ctx.moveTo(srcPos[0], srcPos[1])
         ctx.lineTo(destPos[0], destPos[1])
@@ -718,163 +745,6 @@ export class GraphEditor implements NodeHintsReceiver {
       this.lastFrameTime = null
     }
   }
-}
-
-interface OverlayProps {
-  mode: Mode
-  curGraphPos: Vec2 | null
-  editor: GraphEditor
-  zIndex: any
-}
-
-export function EditorOverlay({
-  mode,
-  curGraphPos,
-  editor,
-  zIndex,
-}: OverlayProps) {
-  let modeColor
-  switch (mode) {
-    case Mode.View:
-      modeColor = "blue"
-      break
-    case Mode.Edit:
-      modeColor = "green"
-      break
-  }
-  const boxShadow = DRAW_MODE_INDICATOR ? `inset 0 0 8px ${modeColor}` : ""
-
-  return (
-    <Box
-      sx={{
-        boxShadow: boxShadow,
-        position: "absolute",
-        top: 0,
-        bottom: 0,
-        left: 0,
-        right: 0,
-        pointerEvents: "none",
-        zIndex: zIndex,
-      }}
-    >
-      {DRAW_CUR_GRAPH_POS ? (
-        <Typography
-          sx={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            color: "white",
-          }}
-          variant="h5"
-        >
-          Cur: {(curGraphPos ?? [])[0]?.toFixed(1)},{" "}
-          {(curGraphPos ?? [])[1]?.toFixed(1)}
-        </Typography>
-      ) : null}
-
-      <Box
-        sx={{
-          position: "absolute",
-          bottom: 1,
-          width: "100%",
-          pointerEvents: "all",
-        }}
-      >
-        <IconButton onMouseDown={() => editor.createNode()}>
-          <Add color="primary" fontSize="large" />
-        </IconButton>
-      </Box>
-    </Box>
-  )
-}
-
-interface HasTryEnterEdit {
-  tryEnterEdit(nodeId: number, startEdit: () => void): void
-}
-
-interface Props {
-  node: NodeStruct
-  semanticScale: SemanticScale
-  width: number
-  height: number
-  /**
-   * When a node is clicked in a way that looks like the user wants to
-   * edit it, calls this function.
-   */
-  tryEnterEdit: HasTryEnterEdit
-  editor: GraphEditor
-}
-
-/**
- * Rendered node needs to be exactly the given width and height.
- */
-export function NodeReact({
-  node,
-  semanticScale,
-  width,
-  height,
-  tryEnterEdit,
-  editor,
-}: Props) {
-  const title = useRef(null)
-  const margin = 8
-  const border = 4
-
-  const textAreaHeight =
-    height - 2 * margin - 2 * border - (title.current?.clientHeight ?? 0)
-
-  return (
-    <>
-      <Box
-        sx={{
-          backgroundColor: "lightblue",
-          border: `white ${border}px solid`,
-          borderRadius: "0.5em",
-          paddingLeft: px(margin),
-          paddingRight: px(margin),
-          paddingBottom: px(margin),
-          // Don't let padding increase client width
-          boxSizing: "border-box",
-          width: width,
-          height: height,
-        }}
-        onMouseDown={() => {
-          editor.hintMoveNode(node.id)
-        }}
-      >
-        {semanticScale == "readable" ? (
-          <>
-            <Typography ref={title} variant="body1">
-              id: {node.id}
-            </Typography>
-            {title.current && textAreaHeight > 0 ? (
-              <TextareaAutosize
-                onMouseDown={(ev) => {
-                  ev.stopPropagation()
-                }}
-                onClick={(ev) => {
-                  tryEnterEdit.tryEnterEdit(node.id, () => {
-                    ev.target.focus()
-                  })
-                }}
-                onChange={(e) => {
-                  node.text = e.target.value
-                  // editor.graph.markDirty(node.id)
-                }}
-                defaultValue={node.text}
-                style={{
-                  width: width - 2 * margin - 2 * border,
-                  minHeight: textAreaHeight,
-                  maxHeight: textAreaHeight,
-                  boxSizing: "border-box",
-                }}
-              />
-            ) : null}
-          </>
-        ) : null}
-      </Box>
-    </>
-  )
 }
 
 function newNodeEl() {

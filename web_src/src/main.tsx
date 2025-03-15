@@ -1,4 +1,4 @@
-import { GraphEditor } from "./components/GraphEditor.tsx"
+import { GraphEditor } from "./components/editor/GraphEditor.tsx"
 import "./App.css"
 import { GraphDiff, InstanceSet, NodeStruct, ObservableGraph, OptionSet, Region, Sequence } from "./util/graph.ts"
 import { DEFAULT } from "./constants.ts"

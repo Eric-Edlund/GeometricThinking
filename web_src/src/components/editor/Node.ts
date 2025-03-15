@@ -1,6 +1,7 @@
-import { NodeStruct } from "../util/graph"
-import { Vec2 } from "../util/points"
-import { applyCss, px, SemanticScale } from "./GraphEditor"
+import { NodeStruct } from "../../util/graph"
+import { Vec2 } from "../../util/points"
+import { SemanticScale } from "./common"
+import { applyCss, px} from "./GraphEditor"
 
 const DEBUG_SHOW_ID = true
 
