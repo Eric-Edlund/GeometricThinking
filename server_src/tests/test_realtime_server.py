@@ -4,7 +4,7 @@ from sqlalchemy import Engine, create_engine, MetaData, select, func
 from sqlalchemy.orm import Session
 from src.schema import Base, Node
 from quart_cors import cors
-from src.server_bp import RealtimeGraphServer
+from src.realtime_server import RealtimeGraphServer
 import asyncio
 from tests.util import actually_not_async
 from tests.utils.synthetic_data import insert_synthetic
@@ -12,6 +12,33 @@ from tests.utils.synthetic_data import insert_synthetic
 
 
 class Test(unittest.TestCase):
+    @actually_not_async
+    async def test_session(self):
+        e = create_engine('sqlite:///data.db')
+        Base.metadata.create_all(bind=e)
+        insert_synthetic(e)
+        app = Quart(__name__)
+        sess = Session(e)
+        service_context = RealtimeGraphServer(sess)
+        service = service_context.__enter__()
+        app.register_blueprint(service, url_prefix="/apiv1")
+        _ = cors(app)
+        app.config['CORS_HEADERS'] = 'Content-Type'
+
+        client = app.test_client()
+
+        res = await client.get('/apiv1/newSession')
+        obj = await res.get_json()
+        assert (first := obj['session'])
+
+        res = await client.get('/apiv1/newSession')
+        obj = await res.get_json()
+        assert (second := obj['session'])
+        assert first != second, f"{first} != {second}"
+        assert type(first) == str
+
+
+
     @actually_not_async
     async def test_sync(self):
         e = create_engine('sqlite:///data.db')
@@ -27,6 +54,8 @@ class Test(unittest.TestCase):
 
         client = app.test_client()
 
+        session = (await (await client.get('/apiv1/newSession')).get_json())['session']
+
         # Get works
         res = await client.get('/apiv1/1/get')
         assert res.status_code == 200
@@ -36,7 +65,9 @@ class Test(unittest.TestCase):
         print('changeid:', initial_change_id)
 
         # Watch of old state id returns immediately
-        res = await client.get(f'/apiv1/1/watch/{initial_change_id - 1}')
+        res = await client.get(f'/apiv1/1/watch/{initial_change_id - 1}', headers={
+            'Realtime-Graph-Session': session,
+        })
         assert res.status_code == 200
         json = await res.get_json()
         assert json['changeId'] == initial_change_id
@@ -45,7 +76,9 @@ class Test(unittest.TestCase):
         update_happened = False
         watch_triggered = False
         async def watch():
-            res = await client.get(f'/apiv1/1/watch/{initial_change_id}')
+            res = await client.get(f'/apiv1/1/watch/{initial_change_id}', headers={
+                'Realtime-Graph-Session': session,
+            })
             assert update_happened, "Watch returned before update happened!"
             json = await res.get_json()
             assert (new := json['changeId']) == initial_change_id + 1, f"New change id did not change: {new}"
@@ -68,6 +101,8 @@ class Test(unittest.TestCase):
                     'dims': [1, 1],
                 }],
             },
+        }, headers={
+            'Realtime-Graph-Session': session,
         })
         assert res.status_code == 200, f"Update failed: {await res.get_data()}"
         json = await res.get_json()
@@ -88,11 +123,15 @@ class Test(unittest.TestCase):
                     'dims': [1, 1],
                 }],
             },
+        }, headers={
+            'Realtime-Graph-Session': session,
         })
         assert res.status_code == 200, f"Failed to create node"
         change_id = (await res.get_json())['changeId']
 
-        res = await client.get(f'/apiv1/1/watch/{change_id - 1}')
+        res = await client.get(f'/apiv1/1/watch/{change_id - 1}', headers={
+            'Realtime-Graph-Session': session,
+        })
         json = await res.get_json()
         assert isinstance(assigned_id := json['id_map']['-1'], int)
         assert assigned_id > 1

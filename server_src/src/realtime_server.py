@@ -1,10 +1,8 @@
 from contextlib import contextmanager
 from typing import ContextManager
 from quart import Blueprint, jsonify, request
-from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 from src.schema import Base, Node
-from asyncio import Event
 from src.graph_proxy import GraphProxy
 import asyncio
 
@@ -38,6 +36,7 @@ def RealtimeGraphServer(sess: Session):
     graph1 = GraphProxy(sess, 1)
     # client sessions -> client node id -> actual node id
     foreign_names: dict[str, dict[int, int]] = {}
+    prev_session_id = 0
 
     server_shutdown = False
     async def autosave():
@@ -45,6 +44,16 @@ def RealtimeGraphServer(sess: Session):
             await asyncio.sleep(1)
             graph1.save()
     asyncio.get_event_loop().create_task(autosave())
+
+    @bp.get('/newSession')
+    async def create_session():
+        nonlocal prev_session_id
+        prev_session_id += 1
+
+        return jsonify({
+            'session': f'session_{prev_session_id}',
+        })
+
 
     @bp.get('/<graph_id>/get')
     async def get_graph(graph_id: str):
@@ -58,35 +67,27 @@ def RealtimeGraphServer(sess: Session):
 
     @bp.post('/<graph_id>/update')
     async def update_graph(graph_id: str):
-        print("Recieved /graphid/update")
         assert graph_id == '1'
 
-        req = await request.get_json()
+        session = request.headers['Realtime-Graph-Session']
+        assert session != ''
 
-        match req:
-            case {
-            "graphId": 1,
-            "changed": {
-                "nodes": nodes,
-            }, }:
-                update = []
-                for n in nodes:
-                    print("Update mentioned", n['id'])
-                    assert isinstance(local_id := n['id'], int)
-                    if local_id < 0:
-                        foreign_names.setdefault('session1', {})
-                        if local_id not in foreign_names['session1']:
-                            n['id'] = None
-                            foreign_names['session1'][local_id] = graph1.makeIdFor(node_from_dict(n))
-                            print("Made id for node", local_id, foreign_names['session1'][local_id])
-                        n['id'] = foreign_names['session1'][local_id]
+        assert (req := await request.get_json()), f"{request.get_data()}"
+        assert req['graphId'] == int(graph_id), f"{req['graphId']} != {graph_id}, {type(req['graphId'])} {type(graph_id)}"
+        assert (nodes := req['changed']['nodes'])
 
-                    update.append(node_from_dict(n))
-                print("Saving udpate")
-                graph1.update(update)
+        update = []
+        for n in nodes:
+            assert isinstance(local_id := n['id'], int)
+            if local_id < 0:
+                foreign_names.setdefault(session, {})
+                if local_id not in foreign_names[session]:
+                    n['id'] = None
+                    foreign_names[session][local_id] = graph1.makeIdFor(node_from_dict(n))
+                n['id'] = foreign_names[session][local_id]
 
-            case _:
-                raise ValueError()
+            update.append(node_from_dict(n))
+        graph1.update(update)
 
         return jsonify({'changeId': graph1.currentStateNum()})
 
@@ -95,8 +96,10 @@ def RealtimeGraphServer(sess: Session):
         assert graph_id == '1'
         state_id: int = int(change_id)
 
+        session = request.headers['Realtime-Graph-Session']
+        assert session != ''
+
         await graph1.watch(state_id)
-        print('Watched', state_id, '->', graph1.currentStateNum())
 
         return jsonify({
             "graphId": 1,
@@ -104,7 +107,7 @@ def RealtimeGraphServer(sess: Session):
             "changed": {
                 'nodes': [node_to_dict(n) for n in graph1.get()],
             },
-            "id_map": foreign_names.get('session1', None),
+            "id_map": foreign_names.get(session, None),
         })
 
     yield bp

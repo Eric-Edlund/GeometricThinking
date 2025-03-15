@@ -13,14 +13,27 @@ export class ServerProxy {
   private waitingForUpdateResponse = false
   private onUpdateResponse: (() => void) | null = null
 
+  private session: null | string = null
+
   constructor(graph: ObservableGraph) {
     this.graph = graph
     this.graphStateNum = this.graph.currentState()
   }
 
   async initialSync() {
-    const graphId = 1
     let res, obj;
+    try {
+      res = await fetch(`${host()}/apiv1/newSession`)
+      obj = await res.json()
+
+      this.session = obj['session']
+    } catch (e) {
+      this.markServerUnavailable("Unable to create session.")
+      console.error(e)
+      return
+    }
+
+    const graphId = 1
     try {
       res = await fetch(`${host()}/apiv1/${graphId}/get`)
       obj = await res.json()
@@ -64,7 +77,10 @@ export class ServerProxy {
       this.waitingForUpdateResponse = true
       const res = await fetch(`${host()}/apiv1/${graphId}/update`, {
         method: "POST",
-        headers: {"Content-Type": "application/json" },
+        headers: {
+          "Realtime-Graph-Session": this.session!,
+          "Content-Type": 'application/json',
+        },
         body: msg,
       })
       const json = await res.json()
@@ -73,6 +89,7 @@ export class ServerProxy {
       this.markServerUnavailable("Problem sending update")
     } finally {
       this.waitingForUpdateResponse = false
+      this.onUpdateResponse ? this.onUpdateResponse() : null;
     }
   }
 
@@ -85,7 +102,7 @@ export class ServerProxy {
         `${host()}/apiv1/${graphId}/watch/${this.serverStateNumber}`,
         {
           method: "GET",
-          // headers: { "Content-Type": "application/json" },
+          headers: { "Realtime-Graph-Session": this.session! },
         },
       )
       const obj = await res.json()

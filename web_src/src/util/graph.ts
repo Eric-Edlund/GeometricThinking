@@ -61,6 +61,10 @@ export class ObservableGraph {
     return this._stateNumber
   }
 
+  numNodes() {
+    return this._nodes.size
+  }
+
   nodes() {
     return this._nodes.values()
   }
@@ -128,7 +132,7 @@ export class ObservableGraph {
   }
 
   nextId() {
-    return --this._nextId
+    return this._nextId--
   }
 
   /**

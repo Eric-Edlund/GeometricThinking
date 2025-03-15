@@ -48,4 +48,22 @@ describe('ObservableGraph', () => {
     expect(listener1).toEqual(false)
     expect(listener2).toEqual(true)
   })
+
+  it('Can add nodes', () => {
+    const graph = testGraph()
+    const numNodes = graph.numNodes()
+
+    const nextId = graph.nextId()
+    expect(nextId).toEqual(-1)
+
+    graph.add({
+      id: nextId,
+      pos: [0,0],
+      dims: [0,0],
+      text: "Text",
+    })
+
+    expect(graph.numNodes()).toEqual(numNodes + 1)
+
+  })
 })
